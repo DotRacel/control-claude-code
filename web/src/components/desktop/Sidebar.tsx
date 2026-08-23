@@ -2,9 +2,11 @@
  * Sidebar.tsx — the session list, permanently on screen.
  *
  * On a phone the list IS a screen and opening a session replaces it; here it is a rail beside the
- * transcript, so switching sessions is a glance and a click rather than a back-and-forward. The
- * rows are the phone's own `SessionCard` (same digest, same badges) with one addition — the open
- * session is marked, which a one-screen-at-a-time layout never needed.
+ * transcript, so switching sessions is a glance and a click rather than a back-and-forward. That
+ * changes what a row has to say: the phone's `SessionCard` is a digest because it is all you get
+ * before you open something, while here the transcript is already on screen — so the rail uses
+ * `SessionRow` instead (dot, name, time, one line) and marks the open session, which a
+ * one-screen-at-a-time layout never needed.
  *
  * The filter lives in DesktopShell rather than here, because ⌘↑/⌘↓ step through this list and they
  * have to step through what is actually on screen — landing in a session the rail is filtering out
@@ -12,7 +14,7 @@
  */
 import { useEffect, useState } from 'react';
 import type { SessionView } from '../../ws.ts';
-import { SessionCard, type Filter } from '../SessionList.tsx';
+import { SessionRow, type Filter } from '../SessionList.tsx';
 import { desktopSurfaces } from '../../render/desktop.tsx';
 import { Help, SignOut } from '../../icons.tsx';
 import { notifyPermission, requestNotifyPermission } from '../../notify.ts';
@@ -32,13 +34,12 @@ export function Sidebar({ shown, activeId, connection, filter, onFilter, onOpen,
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [, tick] = useState(0);
 
-  // Keep "2m 14s" honest while a tool runs.
+  // Keep "3 分钟前" honest. Every 30s, not every second: the rows no longer show a running tool's
+  // stopwatch, and the coarsest thing on screen is a whole minute.
   useEffect(() => {
-    const running = shown.some((s) => s.digest?.toolStatus === 'running');
-    if (!running) return;
-    const t = setInterval(() => tick((n) => n + 1), 1000);
+    const t = setInterval(() => tick((n) => n + 1), 30_000);
     return () => clearInterval(t);
-  }, [shown]);
+  }, []);
 
   const Help_ = desktopSurfaces.help;
   const Confirm = desktopSurfaces.confirm;
@@ -71,7 +72,7 @@ export function Sidebar({ shown, activeId, connection, filter, onFilter, onOpen,
               {connection === 'online' ? '还没有会话。点上面的 ? 看怎么开一个。' : '正在连接…'}
             </div>
           )}
-          {shown.map((s) => <SessionCard key={s.id} s={s} onOpen={onOpen} active={s.id === activeId} />)}
+          {shown.map((s) => <SessionRow key={s.id} s={s} onOpen={onOpen} active={s.id === activeId} />)}
         </div>
       </div>
       {help && <Help_ onDismiss={() => setHelp(false)} />}

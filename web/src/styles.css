@@ -146,9 +146,20 @@ textarea { font: inherit; }
   .sidebar .chips { padding: 0 12px 10px; }
   .sidebar .notify-banner { margin-bottom: 10px; }
   .sidebar-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 16px; }
-  /* The open session. A left edge rather than a fill: the approval badge is the only thing in this
-     rail allowed to use accent colour, and a filled row would outshout it. */
-  .session-card.current { background: var(--raised); box-shadow: inset 2px 0 0 var(--accent); }
+  /* No gutter of its own: the rows are the rail's own inset (12px, above) and their own padding
+     puts the hover fill flush with the heading's left edge. The gap is 2px because the rows are
+     borderless — spacing that had to separate two outlines now only has to separate two words. */
+  .sidebar .session-list { padding: 2px 0 12px; gap: 2px; }
+  /* The open session: a left edge and a brighter name, not a wash of accent — `.dot.wait` is the
+     only thing in this rail allowed to shout. The edge is a `::before` and not the `inset` shadow
+     it started as, because a rounded row bends an inset shadow around the corner and it comes out
+     as a bracket drawn around the dot. */
+  .session-card.compact.current { position: relative; background: var(--raised); }
+  .session-card.compact.current::before {
+    content: ''; position: absolute; left: 0; top: 50%; margin-top: -8px;
+    width: 2px; height: 16px; border-radius: 0 2px 2px 0; background: var(--accent);
+  }
+  .session-card.compact.current .session-name { color: var(--text); }
 
   /* min-height: 0 on BOTH the grid item and the flex child. A grid item's automatic minimum size
      is its content, so without it .dmain grows past the row and takes the composer off the bottom
@@ -359,11 +370,15 @@ textarea { font: inherit; }
 .topbar-lg { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--surface); padding: max(var(--safe-top), 14px) 20px 10px; }
 .topbar-lg h1 { margin: 0; font: 700 26px/1.1 var(--sans); letter-spacing: -.4px; }
 
-/* status dot: always next to a text label, never alone (0c) */
+/* status dot: next to a text label (0c) — the desktop rail is the one place it stands alone, and
+   there the label moves to `title` + `.sr-only` rather than disappearing. */
 .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .dot.on { background: var(--ok); }
 .dot.off { background: var(--muted); }
 .dot.run { background: var(--accent); }
+/* A pending approval. Ringed, because in a rail of green dots colour alone is a weak difference
+   and this is the one thing you must not scroll past. */
+.dot.wait { background: var(--accent); box-shadow: 0 0 0 3px var(--tint-accent); }
 
 /* ── chips ── */
 .chips { flex: none; display: flex; gap: 8px; padding: 0 20px 8px; }
@@ -385,6 +400,22 @@ textarea { font: inherit; }
 .session-when { font: 400 11.5px/1 var(--sans); color: var(--muted); flex: none; }
 .session-prompt { margin-top: 9px; font: 400 13px/1.45 var(--serif); color: var(--text-2); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .session-meta { margin-top: 9px; display: flex; align-items: center; gap: 7px; font: 400 11.5px/1.3 var(--mono); color: var(--muted); }
+/* ── the desktop rail's compact row (SessionRow) ──
+   The same card with three lines removed, so the rail can hold a dozen sessions instead of four.
+   Borderless on purpose: at 34px tall a 1px outline per row reads as a stack of boxes, so the
+   background does the work and only hover / the open session get one. */
+.session-card.compact {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 12px; border: none; border-radius: 9px; background: none;
+}
+.session-card.compact .session-name { flex: 1; font: 500 13.5px/1.4 var(--sans); color: var(--text-2); }
+.session-card.compact .session-when { font-size: 11px; }
+.session-card.compact:hover { background: var(--raised); }
+/* In the rail the accent belongs to the approval dot alone, so a running tool is a PULSING green
+   rather than a second orange — the hierarchy the phone card gets from its badge instead. */
+.session-card.compact .dot.run { background: var(--ok); animation: cc-breathe 1.6s ease-in-out infinite; }
+@keyframes cc-breathe { 0%, 100% { opacity: 1 } 50% { opacity: .3 } }
+
 /* the only badge that ever gets accent colour (1a) */
 .badge-approval { display: flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 11px; background: var(--tint-accent); color: var(--accent-soft); font: 600 11px/1 var(--sans); flex: none; }
 
@@ -724,7 +755,7 @@ textarea { font: inherit; }
   .enter, .sheet, .backdrop, .to-bottom { animation-duration: 80ms; animation-timing-function: linear; }
   .sheet { animation-name: cc-fade; }
   .to-bottom { animation-name: cc-fade; }
-  .caret, .spinner { animation: none; }
+  .caret, .spinner, .session-card.compact .dot.run { animation: none; }
   .send { transition: none; }
   .tool-row.press { transform: none; }
 }

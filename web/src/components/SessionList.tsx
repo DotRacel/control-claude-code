@@ -136,3 +136,43 @@ export function SessionCard({ s, onOpen, active }: { s: SessionView; onOpen: (s:
     </button>
   );
 }
+
+/**
+ * SessionRow — the desktop rail's row: a dot, a name, a time, on one line.
+ *
+ * The phone's `SessionCard` is a digest because the list IS the screen there — it has to answer
+ * "what is this session doing" before you commit to opening it. The rail never has to: the
+ * transcript is already open one pane over. So the prompt excerpt and the tool line, ~115px of
+ * card, bought nothing and cost the rail its whole point — four sessions filled it.
+ *
+ * The status WORD goes with them. The dot carries it (colour, plus a pulse while a tool runs) and
+ * `title` + `.sr-only` keep the words for hover and for screen readers, so this is a smaller row
+ * rather than a quieter one — the one place the design's "never a dot alone" rule (0c) bends,
+ * because the label is still there, just not spending a line.
+ */
+export function SessionRow({ s, onOpen, active }: { s: SessionView; onOpen: (s: SessionView) => void; active?: boolean }) {
+  const d = s.digest ?? ({ toolCalls: 0, pendingApproval: false, turnActive: false } as SessionView['digest']);
+  const running = d.toolStatus === 'running' && s.status === 'active';
+  // One dot for four states, most urgent first: an approval outranks a running tool, which
+  // outranks merely being online.
+  const [state, label] = d.pendingApproval
+    ? ['wait', '需要审批']
+    : running
+      ? ['run', `运行中 · ${toolDisplayName(d.tool!)}`]
+      : s.status === 'active' ? ['on', '在线'] : ['off', '离线'];
+  const name = s.machine || '未知设备';
+
+  return (
+    <button
+      // No `attention` class: the border it used to colour is gone, so `.dot.wait` is the signal.
+      className={`session-card compact${active ? ' current' : ''}`}
+      onClick={() => onOpen(s)}
+      title={`${name} · ${label}${s.dir ? ` · ${s.dir}` : ''}`}
+    >
+      <span className={`dot ${state}`} />
+      <span className="session-name ellipsis">{name}</span>
+      <span className="sr-only">{label}</span>
+      <span className="session-when">{relTime(s.lastActivity)}</span>
+    </button>
+  );
+}
