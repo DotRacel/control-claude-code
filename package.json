@@ -50,6 +50,7 @@
     "history-audit": "node test/history-audit.ts",
     "shape-report": "node test/shape-report.ts",
     "verify-injection": "node test/verify-injection.ts",
+    "test-spawn-chain": "node test/test-spawn-chain.ts",
     "render-history": "node test/render-history.ts",
     "ui-preview": "node test/ui-preview.ts",
     "ui-shot": "node test/ui-shot.ts",

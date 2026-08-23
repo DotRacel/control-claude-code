@@ -219,14 +219,23 @@ known range to the gates that match it.
    profile and stay green (no regression from a too-wide `since`).
 2. **Unit tests:** `npm test` — `test/profiles.test.ts` covers the selection logic; add a case for
    the new boundary.
-3. **Rebind, on real metal (needs a credential):** `verify-injection` proves a gate *locates*, not
-   that its rebind *neutralizes* the guard. `test-gates.ts` is the only thing that proves the gate is
-   actually crossed:
+3. **Rebind, on real metal:** `verify-injection` proves a gate *locates*, not that its rebind
+   *neutralizes* the guard. Two scripts prove that, and they cover different halves:
    ```bash
-   CLAUDE_BIN="$BIN" node test/test-gates.ts     # stub server + real remote-control, asserts POST /v1/environments/bridge
+   CLAUDE_BIN="$BIN" node test/test-gates.ts        # stub server + real remote-control, asserts POST /v1/environments/bridge
+   CLAUDE_BIN="$BIN" node test/test-spawn-chain.ts  # real in-process controller: the worker spawn + the child's own dHs gate
    ```
-   Always run this for a **new rebind** (a new `bpSubstr`/`rebinds`), even if locate is green — a
+   Always run these for a **new rebind** (a new `bpSubstr`/`rebinds`), even if locate is green — a
    rebind can locate perfectly and still fail to neutralize (wrong return value, wrong pause point).
+
+   **`test-gates.ts` alone is not "the rebind is verified".** Its stub answers `/work/poll` with no
+   work, so bridgeMain never spawns the worker and `spawner.spawn` reports `hit=false` there
+   permanently — which reads like coverage and is the absence of it, on the one gate whose window has
+   now drifted twice. `test-spawn-chain.ts` stands up the real controller (in-memory, no Docker, no
+   DATABASE_URL, no credential of yours) so registration queues work, the spawn happens, and the
+   child's `--sdk-url` gate is rebound and *used*. It reports its six links in order, so a red run
+   tells you which one broke — and if a gate merely failed to locate it says so and sends you back
+   here rather than blaming the chain.
 4. **CI:** add the new version to the matrix in `.github/workflows/injection-compat.yml` if it's a
    boundary worth watching, and let `latest` catch the next one.
 

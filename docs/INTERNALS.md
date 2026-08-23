@@ -152,6 +152,7 @@ src/server/
   index.ts            REST (environments/work/sessions) + CCR v2 SSE data-plane
 src/cli.ts            test driver: server + injector + observe the whole handshake
 test/test-gates.ts    injector-only check (gates crossed + base-url redirected)
+test/test-spawn-chain.ts  the child-spawn half of that, which test-gates cannot reach
 test/verify-injection.ts  no-auth per-version gate-locate check (CI canary)
 ```
 
@@ -161,6 +162,7 @@ test/verify-injection.ts  no-auth per-version gate-locate check (CI canary)
 node src/cli.ts                       # full handshake loop, prints every step
 CCC_DEBUG_FILE=/tmp/b.log node src/cli.ts   # + capture the bridge's debug log
 node test/test-gates.ts               # injector-only assertion
+node test/test-spawn-chain.ts         # + the worker spawn and its own --sdk-url gate
 node src/injector/extract-anchors.ts  # refresh anchors against the installed claude
 ```
 Requires Node ≥22 (uses native TS type-stripping). Set `CLAUDE_BIN` to override the
