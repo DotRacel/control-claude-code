@@ -401,12 +401,23 @@ textarea { font: inherit; }
    so once the transcript overflowed they were shrunk to their 2px borders. Nothing in a
    scrolling column may shrink. */
 .chat > *, .session-list > * { flex: none; }
-/* No `align-self` here on purpose. On the phone the transcript column is `align-items: stretch`
-   (flex's default), so the bubble fills the width with no help. On desktop the column is
-   `align-items: center` and the bubble must centre with everything else — an explicit
-   `align-self: stretch` used to override that and pin the bubble to the left, out of line with the
-   centred prose and tool cards beside it. */
+/* The user's turn is the one item that does NOT fill the column: it hugs the right edge, the way
+   a sent message does everywhere else, so a glance down the transcript separates what you asked
+   from what came back without reading a word.
+
+   Right-alignment lives on the ROW, never on .bubble-user itself. `.bubble-row` is the column
+   item — full width on the phone (`align-items: stretch`), centred and capped at the readable
+   measure on the desktop — and the bubble is a flex child inside it. Pinning the bubble directly
+   (`align-self: flex-end`) would take it out of that shared column and leave it off-centre from
+   the prose and tool cards beside it, which is the exact failure test/ui-shot's geometry gate
+   checks for.
+
+   The cap is on the row's child, so a short message is a short bubble and a long one stops at 85%
+   rather than reaching the left edge — without that it is a full-width bubble that merely happens
+   to end on the right, which reads as no alignment at all. */
+.bubble-row { display: flex; justify-content: flex-end; }
 .bubble-user {
+  max-width: 85%;
   background: var(--bubble); border-radius: var(--radius-bubble);
   padding: 14px 16px; font: 400 16px/1.4 var(--sans); white-space: pre-wrap; word-break: break-all;
 }
@@ -506,10 +517,14 @@ textarea { font: inherit; }
 .error-card .t1 { font: 600 13.5px/1.3 var(--sans); color: var(--danger); }
 .error-card .t2 { margin-top: 4px; font: 400 12.5px/1.5 var(--mono); color: var(--text-3); }
 
-/* activity line while the agent holds the turn (1c) */
-.activity { display: flex; align-items: center; gap: 9px; font: 400 13px/1.4 var(--mono); color: var(--accent); }
-/* the glyph itself changes (parts.tsx's StarSpinner), so the box is fixed at 1ch and the line
-   never reflows as the frames swap */
+/* The agent-holds-the-turn spinner (1c). It sits between the transcript and the composer, not
+   inside the scroller, so it stays visible while you scroll back through the turn and does not
+   push the last card up each time it appears. Horizontal padding matches .composer-wrap's so the
+   glyph lines up with the left edge of the field below it — padding rather than margin because on
+   the desktop this box is a `width: 100%` measure child, where a margin would overflow it. */
+.activity { flex: none; padding: 0 var(--gutter) 8px; display: flex; align-items: center; font: 400 13px/1.4 var(--mono); color: var(--accent); }
+/* the glyph itself changes (parts.tsx's StarSpinner), so the box is fixed at 1ch and nothing
+   beside it shifts as the frames swap */
 .activity .spin { width: 1ch; flex: none; text-align: center; }
 
 /* new cards fade + rise 8px / 180ms; only the newest one animates (0c) */

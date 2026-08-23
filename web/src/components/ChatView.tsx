@@ -1,5 +1,5 @@
 /**
- * ChatView.tsx — one session: header, connection banner, transcript, activity line, composer,
+ * ChatView.tsx — one session: header, connection banner, transcript, activity spinner, composer,
  * and the three sheets.
  *
  * Rules from the design doc that are easy to break and so are called out here:
@@ -86,14 +86,17 @@ export function ChatView({ session, sock, connection, onBack, registerEvent, reg
         {state.items.map((it, i) => (
           <ItemView key={it.id} it={it} isLast={i === state.items.length - 1} h={actions} renderers={phoneRenderers} />
         ))}
-        {/* Offline, nothing is running here to report — a spinner would just keep promising work
-            that no connected claude is doing. */}
-        {busy && !offline && (
-          <ActivityLine running={state.live.running} thinking={state.live.thinking} tokens={state.live.thinkingTokens} compacting={state.live.compacting} />
-        )}
       </div>
 
       <p className="sr-only" role="status" aria-live="polite">{announce}</p>
+
+      {/* Above the composer, not at the tail of the transcript: pinned there it stays on screen
+          while you scroll back through the turn, and it no longer shifts the last card down every
+          time the agent picks up a tool. Offline, nothing is running here to report — a spinner
+          would just keep promising work that no connected claude is doing. */}
+      {busy && !offline && (
+        <ActivityLine running={state.live.running} thinking={state.live.thinking} tokens={state.live.thinkingTokens} compacting={state.live.compacting} />
+      )}
 
       <Composer
         busy={busy}

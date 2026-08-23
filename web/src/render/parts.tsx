@@ -7,10 +7,10 @@
  * the headline argument, the ± counts, the one-line result, the images underneath — is identical,
  * and duplicating it would mean two places to fix the next time a tool needs a different summary.
  *
- * So the *body* lives here and each platform supplies its own button around it. The activity line
- * and the connection banner are here for the simpler reason that they are word-for-word the same on
- * a phone and on a desktop — they report what the agent is doing and whether we can reach it, and
- * neither answer changes with the pointer.
+ * So the *body* lives here and each platform supplies its own button around it. The activity
+ * spinner and the connection banner are here for the simpler reason that they are identical on a
+ * phone and on a desktop — one says the agent still holds the turn and the other says whether we
+ * can reach it, and neither answer changes with the pointer.
  */
 import { useEffect, useRef, useState } from 'react';
 import type { ToolCall } from '../model.ts';
@@ -99,10 +99,16 @@ function ImageAttachmentView({ att, url }: { att: ImageAttachment; url: string |
 }
 
 /**
- * One line under the transcript for as long as the agent holds the turn. The glyph is ALWAYS the
- * CLI's star spinner (StarSpinner below — the Anthropic one, kept by explicit request; do not
- * swap it for a plainer dot). What the agent is *actually* doing is the TEXT's job: the open tool
- * with its runtime, 思考中 with a token count, or a bare 运行中 between steps.
+ * The "the agent holds the turn" indicator, parked directly above the composer. It is the glyph
+ * and nothing else: it sits inches from where you type, where a line of shifting text (a tool
+ * name, a token count, a ticking duration) reflowed the bar you are aiming at and read as noise
+ * next to the transcript it used to annotate. The glyph is ALWAYS the CLI's star spinner
+ * (StarSpinner below — the Anthropic one, kept by explicit request; do not swap it for a plainer
+ * dot).
+ *
+ * What the agent is doing is not thrown away, it is moved: the same sentence goes to a screen
+ * reader through .sr-only, which has no bar to reflow. Rendered on change only — the duration is
+ * no longer visible, so there is nothing left for a per-second timer to repaint.
  */
 export function ActivityLine({ running, thinking, tokens, compacting }: {
   running?: { name: string; arg: string; since: number };
@@ -110,38 +116,34 @@ export function ActivityLine({ running, thinking, tokens, compacting }: {
   tokens?: number;
   compacting?: boolean;
 }) {
-  const [, tick] = useState(0);
-  useEffect(() => {
-    if (!running) return;
-    const t = setInterval(() => tick((n) => n + 1), 1000);
-    return () => clearInterval(t);
-  }, [running?.since]);
+  return (
+    <div className="activity">
+      <StarSpinner />
+      <span className="sr-only">{activityLabel({ running, thinking, tokens, compacting })}</span>
+    </div>
+  );
+}
 
+/** The sentence the line used to print. Same order of precedence, now for listeners only. */
+function activityLabel({ running, thinking, tokens, compacting }: {
+  running?: { name: string; arg: string; since: number };
+  thinking?: boolean;
+  tokens?: number;
+  compacting?: boolean;
+}): string {
   // First, because it is the one state that explains a multi-minute stall: while the worker
   // compacts, no tool is open and the model is not reasoning, so every other branch here would
   // either say nothing useful or describe something that already finished.
-  if (compacting) return <div className="activity"><StarSpinner />正在压缩上下文…</div>;
+  if (compacting) return '正在压缩上下文…';
   if (running) {
     const s = Math.max(0, Math.round((Date.now() - running.since) / 1000));
     const dur = s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
     const arg = running.arg ? ` · ${running.arg.split('\n')[0].slice(0, 40)}` : '';
-    return (
-      <div className="activity">
-        <StarSpinner />
-        {`${toolDisplayName(running.name)}${arg} · ${dur}`}
-      </div>
-    );
+    return `${toolDisplayName(running.name)}${arg} · ${dur}`;
   }
-  if (thinking) {
-    return (
-      <div className="activity">
-        <StarSpinner />
-        {tokens ? `思考中 · ${tokens} tokens` : '思考中'}
-      </div>
-    );
-  }
+  if (thinking) return tokens ? `思考中 · ${tokens} tokens` : '思考中';
   // Working, but neither reasoning nor inside a tool — streaming prose, or between steps.
-  return <div className="activity"><StarSpinner />运行中</div>;
+  return '运行中';
 }
 
 /** The CLI's own activity glyph: it grows to a full star and shrinks back, one frame at a time. */

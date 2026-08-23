@@ -2,7 +2,8 @@
  * phone.tsx — the phone's renderer for every item kind, as one `ItemRenderers` object.
  *
  * Rendering rules taken from the design doc:
- *  - assistant prose is serif, with no avatar and no bubble; the user's turn is the only bubble
+ *  - assistant prose is serif, with no avatar and no bubble; the user's turn is the only bubble,
+ *    and it hugs the right edge rather than taking the full column
  *  - adjacent tool calls are one bordered group, each row a single line + a result line
  *  - a tool's raw output is NOT inline: the row opens the output sheet (1e)
  *  - only the newest item animates in; earlier ones never re-animate on re-render (0c)
@@ -36,9 +37,16 @@ const SCROLL_SLOP_PX = 10;
  * difference is that a missing arm is now a type error rather than a blank space on the screen.
  */
 export const phoneRenderers: ItemRenderers = {
+  // Two elements, not one. The bubble hugs the right edge, but the transcript column is one
+  // shared measure — on the desktop every item is centred and capped at 45rem, and a bubble that
+  // pinned ITSELF right would sit outside that column, off-centre from the prose beside it (the
+  // regression test/ui-shot's geometry gate exists to catch). So the row is the column item, full
+  // width like everything else, and the bubble is right-aligned INSIDE it.
   user: ({ it, isLast }) => (
-    <div className={`bubble-user${it.state === 'queued' ? ' queued' : ''} ${enterClass(isLast) ?? ''}`}>
-      {it.text}
+    <div className={`bubble-row ${enterClass(isLast) ?? ''}`}>
+      <div className={`bubble-user${it.state === 'queued' ? ' queued' : ''}`}>
+        {it.text}
+      </div>
     </div>
   ),
 

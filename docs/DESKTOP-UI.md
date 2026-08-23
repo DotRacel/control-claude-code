@@ -16,7 +16,7 @@ say.
 |---|---|---|
 | Event → transcript | `web/src/model.ts` | One reducer eats both the history backfill and the live stream; a second copy would drift on the shapes nobody looks at |
 | How a session *works* | `web/src/session.ts` (`useSession`, `useTranscriptScroll`) | Subscribing, backfilling, re-deriving `busy` from replayed events, sending, stopping, answering, staying pinned to the bottom. A laptop that quietly stopped re-subscribing after a reconnect looks like a quiet session |
-| A tool card's body, the activity line, the connection banner | `web/src/render/parts.tsx` | Same words either way; only *what opens a row* differs |
+| A tool card's body, the activity spinner, the connection banner | `web/src/render/parts.tsx` | Same words either way; only *what opens a row* differs |
 | The five modal surfaces' contents | `web/src/render/surface-parts.tsx` | Same permission buttons, same install instructions; only the container differs |
 
 | Per-platform | Where |
@@ -54,11 +54,12 @@ surface objects must fail.
   emptied the probe. Two details the first cut got wrong: the cap is a **fixed length (45rem), not
   `ch`** — `ch` resolves against each item's *own* font, so serif prose (17.5px) and a sans tool
   card (16px) capped at "78ch" came out ~30px apart and their left edges did not line up; one fixed
-  measure keeps the whole column on one edge. And the user bubble carries **no `align-self`** — the
-  phone column is `align-items: stretch` (flex's default) so the bubble fills the width there, while
-  the desktop column is `align-items: center` so it centres here; a leftover `align-self: stretch`
-  from the phone-only days pinned the bubble to the left, out of line with the prose and tool cards
-  beside it.
+  measure keeps the whole column on one edge. And the user bubble right-aligns through a **row**
+  (`.bubble-row`), never through `align-self` on the bubble itself: the row is the column item, so
+  it centres and caps like every other item, and the bubble is a flex child pushed to the row's
+  right edge and capped at 85% of it. A bubble that pinned *itself* right would leave the shared
+  column entirely and sit off-centre from the prose beside it — the same class of failure a
+  leftover `align-self: stretch` once caused on the left.
 
 `useWide()` (App.tsx) listens to the media query rather than sampling it once: the breakpoint has to
 be crossable by dragging a window, and `ui-shot` proves both forms by resizing one browser. The
@@ -145,8 +146,8 @@ keeps `.chat`, so the same selectors work — with two changes: the tool-row ope
 `click` as well as the mousedown/mouseup pair the phone needs, and a shot can carry
 `only: ['desktop']` so the ⌘K switcher does not re-shoot the chat on a device that cannot open it.
 
-**On comparing screenshots.** Several shots are not deterministic: the session list and the activity
-line render a live elapsed counter, so `01`, `03`, `04`, `05` and `10` differ between two runs of
-identical code. Compare the other ten, and when one of those differs, check the *magnitude* before
+**On comparing screenshots.** Several shots are not deterministic: the session list renders a live
+elapsed counter and the activity spinner is mid-animation (its star frame advances every 120ms), so
+`01`, `03`, `04`, `05` and `10` differ between two runs of identical code. Compare the other ten, and when one of those differs, check the *magnitude* before
 believing it — dropping two wrapper divs shifted one band of the phone's composer by 2/255, which is
 compositing noise, not movement. Item heights are the reliable signal, and `ui-shot` prints them.

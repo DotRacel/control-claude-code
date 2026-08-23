@@ -81,16 +81,17 @@ export function DesktopChat({ session, sock, connection, registerEvent, register
             renderers={desktopRenderers}
           />
         ))}
-        {/* Offline, nothing is running here to report — a spinner would just keep promising work
-            that no connected claude is doing. */}
-        {busy && !offline && (
-          <ActivityLine running={state.live.running} thinking={state.live.thinking} tokens={state.live.thinkingTokens} compacting={state.live.compacting} />
-        )}
       </div>
 
       <p className="sr-only" role="status" aria-live="polite">{announce}</p>
 
       <div className="dchat-composer">
+        {/* Inside the composer block, so it inherits the same measure and the same left edge as
+            the field below it. Offline, nothing is running here to report — a spinner would just
+            keep promising work that no connected claude is doing. */}
+        {busy && !offline && (
+          <ActivityLine running={state.live.running} thinking={state.live.thinking} tokens={state.live.thinkingTokens} compacting={state.live.compacting} />
+        )}
         <Composer
           busy={busy}
           offline={offline}

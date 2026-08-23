@@ -52,7 +52,7 @@ Four things the design doc could not have known, found by reading real captured 
   ephemeral events, but a completed interactive turn delivered `user → assistant → result` and
   nothing else. So prose appears per message, not per token; the reducer handles both (the
   streamed draft is replaced in place, never appended twice) and the busy state is carried by the
-  activity line instead of a caret.
+  activity spinner instead of a caret.
 
 **Six more, found by exporting a real deployment's history** (6298 events, 3 sessions) and
 replaying it through the reducer — `npm run export-history && npm run history-audit`, which reports
@@ -218,6 +218,20 @@ reversed an earlier decision:
   That inset is clearance for the home indicator's *gesture* area, not a margin a bottom bar must
   float above; sitting 34pt up left a band of bare page background that read as a hole. The sheets
   keep the full inset, since their buttons are the primary action.
+- **The activity indicator sits above the composer and is the glyph alone.** It used to be the last
+  line *inside* the scroller, printing the open tool, a token count or a ticking duration. Two
+  problems: it scrolled away exactly when you wanted to know whether the agent was still working,
+  and the shifting text reflowed a bar sitting inches from where you type. Now it is a `flex: none`
+  row between the transcript and the field, matching `.composer-wrap`'s horizontal padding so the
+  star lines up with the field's left edge — and the sentence it used to print goes to `.sr-only`,
+  where there is no bar to reflow. Nothing about the glyph is up for revisiting: it is the CLI's
+  star, never a dot, and the line carries no visible text.
+- **The user's turn hugs the right edge.** It is the only item that does not fill the column, so a
+  glance down the transcript separates what you asked from what came back. The alignment lives on a
+  wrapper row (`.bubble-row`, `justify-content: flex-end`) with the bubble capped at 85% inside it,
+  never on the bubble itself — the desktop centres every `.chat > *` in one measure, and a bubble
+  that pinned itself right would leave that column (docs/DESKTOP-UI.md, and `ui-shot --device
+  desktop` fails the run if it does).
 
 **The slash picker is keyboard-navigable now**, which it looks like it always was: it painted the
 first row as selected while nothing could actually select it, so pressing return sent `/rc` as raw
