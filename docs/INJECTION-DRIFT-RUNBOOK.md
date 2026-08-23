@@ -2,8 +2,8 @@
 
 What to do when the `injection-compat` CI goes red — i.e. a `claude` release reshaped one of the
 guards the injector patches, and a gate no longer locates. Written from the fixes that actually
-happened (2.1.229 path drift, 2.1.234 spawner window, 2.1.238 `dispatch.trust` merge), so it
-encodes the judgement calls, not just the steps.
+happened (2.1.229 path drift, 2.1.234 spawner window, 2.1.238 `dispatch.trust` merge, the
+four-gate 2.1.239 release), so it encodes the judgement calls, not just the steps.
 
 Read [docs/INTERNALS.md](INTERNALS.md) (the "Version-profiled injection" section) first if you
 haven't — this runbook assumes you know what a gate and a profile are.
@@ -26,8 +26,11 @@ The gate set is **version-profiled** (`profiles.ts`): a profile bundles the gate
 range, and the injector detects the claude version at launch and picks one. A fix is therefore
 usually "add a gate variant + a profile", not "edit the one true gate".
 
-**Drift is almost always one gate, not many.** Across 2.1.236→2.1.238 exactly one of fifteen gates
-moved. Expect a surgical fix.
+**Most releases move one gate; some move several, and that does not mean several profiles.**
+Across 2.1.236→2.1.238 exactly one of fifteen gates moved. 2.1.239 moved four — but three of those
+were the same code sliding around (a call gaining an argument, a match sliding past its window) and
+only one was a guard growing a second code path. Diagnose each failing gate independently and
+expect most of them to be widens.
 
 ---
 
@@ -145,8 +148,11 @@ Rule of thumb: **widen for cosmetics, branch for structure.** A widened regex th
 ## 6. Write the gate (or variant)
 
 Gates live as **named constants** in `anchors.ts` (`GATE_DISPATCH_OAUTH`, …); a gate with variants
-just gets a second constant (`GATE_DISPATCH_TRUST_LEGACY` / `_PREFLIGHT`) and `headlessGates()`
-picks which one a profile uses. A `GateSpec` is four things:
+just gets a second constant (`GATE_DISPATCH_TRUST_LEGACY` / `_PREFLIGHT`,
+`GATE_BRIDGEMAIN_TOKENURL_SYNC` / `_ASYNC`) and a field on `GateVariants`, which
+`headlessGates({trust, tokenUrl})` reads to assemble a profile's set. Add the field rather than a
+positional parameter — every variant is a `GateSpec`, so positional args let a swapped call compile
+clean. A `GateSpec` is four things:
 
 - `windowAnchor` + `windowBack`/`windowFwd` — the slice to search (keeps regexes unambiguous).
 - `aliases` — `{ name: regex }`, capture group 1 is the current minified alias.
@@ -243,7 +249,21 @@ known range to the gates that match it.
 | ≤2.1.228 → 2.1.229 | embedded bundle path `/$bunfs/root/src/entrypoints/cli.js` → flattened `/$bunfs/root/cli` | read `Bun.main` at runtime, never hardcode the path (fixed for all future renames) |
 | 2.1.234 | `spawner.spawn` env-options literal grew; `windowsHide` fell past `windowFwd` | **widen** regex `env:([\w$]+)[,}]` + `windowFwd` 1200→1600 |
 | 2.1.238 | `dispatch.trust`: two trusted-device functions merged into `preflightTrustedDeviceBlocking` | **branch** — `preflight` profile, alias `Z`, rebind `→ return null` |
+| 2.1.239 | `dispatch.trust`: the merged call gained an argument (`await K(Z)`, was `await K()`) | **widen** — `bpSubstr` stops at the open paren: `=await ${Z}(` |
+| 2.1.239 | `spawner.spawn`: env construction grew, `env:m` slid to +2007 past a `windowFwd:1600` | **widen** — `windowFwd` 1600→3600 (the 2.1.234 failure, verbatim, one release later) |
+| 2.1.239 | `int.preflight`: login check became a ternary, side-effect call gained an argument | **widen** — `if\(![^;]*?\)return\{kind` + `\([^)]*\)` on both calls |
+| 2.1.239 | `bridgeMain.tokenurl`: `getBridgeAccessTokenAsync` added beside the sync getter, chosen at runtime | **branch** — `async-token` profile, aliases `M`/`A`/`P`/`U`, three rebinds |
 
 The pattern: path/name churn is absorbed automatically; window-edge fragility is a widen; a real
 structural change is a branch. When unsure which, the error string in step 1 and the offset math in
 step 4 tell you.
+
+**2.1.239 is the instructive one: four gates failed at once, and only one of them was a branch.**
+A red CI leg with several failing gates is not four separate structural changes — read each error
+string on its own. Three of these were the release moving code around; one was a guard genuinely
+gaining a second code path. Branching all four would have meant three gates that each need a new
+variant on every future release, for nothing.
+
+**A widen still has to be re-verified DOWNWARD.** `windowFwd` can only grow the search space, so
+the first match cannot move — but a loosened regex can match a *different, shorter* span on an
+older bundle. Run the oldest version in each surviving profile's range, not just the new one.

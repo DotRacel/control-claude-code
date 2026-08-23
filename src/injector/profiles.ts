@@ -24,6 +24,8 @@ import {
   headlessGates,
   GATE_DISPATCH_TRUST_LEGACY,
   GATE_DISPATCH_TRUST_PREFLIGHT,
+  GATE_BRIDGEMAIN_TOKENURL_SYNC,
+  GATE_BRIDGEMAIN_TOKENURL_ASYNC,
   INTERACTIVE_GATES,
 } from './anchors.ts';
 
@@ -43,22 +45,36 @@ export interface InjectionProfile {
 /**
  * Profiles, ORDER-INDEPENDENT (selectProfile sorts by `since`). Add newest-drift profiles here.
  *
- * The interactive `/rc` gates and the child `--sdk-url` locator are stable across every version
- * measured so far, so both profiles share `INTERACTIVE_GATES`; only `dispatch.trust` differs.
+ * Only STRUCTURAL drift earns a profile. A guard that merely gained a parameter, or moved further
+ * from its window anchor, is absorbed by widening the gate in anchors.ts — one gate then keeps
+ * covering every version. So far exactly two gates have branched, and the interactive `/rc` gates
+ * and the child `--sdk-url` locator have never needed to: all three profiles share
+ * `INTERACTIVE_GATES`.
  */
 export const PROFILES: InjectionProfile[] = [
   {
     id: 'legacy',
     since: '2.1.229',
     verifiedThrough: '2.1.237',
-    gates: headlessGates(GATE_DISPATCH_TRUST_LEGACY),
+    gates: headlessGates({ trust: GATE_DISPATCH_TRUST_LEGACY, tokenUrl: GATE_BRIDGEMAIN_TOKENURL_SYNC }),
     interactiveGates: INTERACTIVE_GATES,
   },
   {
+    // A one-version profile: 2.1.238 merged the trusted-device functions, 2.1.239 reshaped the
+    // token guard right after it. Narrow ranges are the expected shape here, not a smell.
     id: 'preflight',
     since: '2.1.238',
     verifiedThrough: '2.1.238',
-    gates: headlessGates(GATE_DISPATCH_TRUST_PREFLIGHT),
+    gates: headlessGates({ trust: GATE_DISPATCH_TRUST_PREFLIGHT, tokenUrl: GATE_BRIDGEMAIN_TOKENURL_SYNC }),
+    interactiveGates: INTERACTIVE_GATES,
+  },
+  {
+    // 2.1.239 added getBridgeAccessTokenAsync beside the sync getter and made bridgeMain choose
+    // between them at runtime, so the tokenurl gate has to rebind both.
+    id: 'async-token',
+    since: '2.1.239',
+    verifiedThrough: '2.1.241',
+    gates: headlessGates({ trust: GATE_DISPATCH_TRUST_PREFLIGHT, tokenUrl: GATE_BRIDGEMAIN_TOKENURL_ASYNC }),
     interactiveGates: INTERACTIVE_GATES,
   },
 ];

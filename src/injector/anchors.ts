@@ -114,14 +114,18 @@ export const GATE_DISPATCH_TRUST_LEGACY: GateSpec = {
 
 // ── dispatch: trusted-device gate — PREFLIGHT variant (≥2.1.238).
 // Merged into one function: `let{preflightTrustedDeviceBlocking:Z}=…,W=await Z();if(W)…H(Error)`.
-// Break at `=await Z()` (Z already destructured), rebind Z → returns null so `if(W)` never fires.
+// Break at `=await Z(` (Z already destructured), rebind Z → returns null so `if(W)` never fires.
+//
+// bpSubstr stops at the OPEN PAREN on purpose: 2.1.239 started passing the credentials store in
+// (`ne=await K(Z)` where 2.1.238 had `W=await Z()`). Same guard, same rebind — a parameter is
+// cosmetic, so this widens rather than branching. Our replacement ignores whatever it's handed.
 export const GATE_DISPATCH_TRUST_PREFLIGHT: GateSpec = {
   id: 'dispatch.trust',
   windowAnchor: 'cli_bridge_path',
   windowBack: 0,
   windowFwd: 3600,
   aliases: { Z: 'preflightTrustedDeviceBlocking:([\\w$]+)\\}' },
-  bpSubstr: '=await ${Z}()',
+  bpSubstr: '=await ${Z}(',
   rebinds: ['${Z}=async function(){return null}'],
 };
 
@@ -138,7 +142,8 @@ export const GATE_BRIDGEMAIN_TRUST: GateSpec = {
 
 // ── bridgeMain: getBridgeAccessToken guard + getBridgeBaseUrl consume.
 // M,P destructured together → rebind both at the `if(!M())` pause: M→token, P→our URL.
-export const GATE_BRIDGEMAIN_TOKENURL: GateSpec = {
+// SYNC variant (≤2.1.238): one token getter, read straight into the guard.
+export const GATE_BRIDGEMAIN_TOKENURL_SYNC: GateSpec = {
   id: 'bridgeMain.tokenurl',
   windowAnchor: 'base URL uses HTTP',
   windowBack: 4000,
@@ -146,6 +151,38 @@ export const GATE_BRIDGEMAIN_TOKENURL: GateSpec = {
   aliases: { M: 'getBridgeAccessToken:([\\w$]+),', P: 'getBridgeBaseUrl:([\\w$]+)\\}' },
   bpSubstr: 'if(!${M}())',
   rebinds: ['${M}=function(){return ${TOKEN}}', '${P}=function(){return ${URL}}'],
+};
+
+// ── bridgeMain: same gate — ASYNC variant (≥2.1.239).
+// 2.1.239 added a SECOND token getter and picks between them at runtime:
+//   {getBridgeAccessToken:M,getBridgeAccessTokenAsync:A,getBridgeBaseUrl:P}=await …,
+//   U=Nt()&&r!==void 0; if(!(U?await A(r):M())) process.exit(1)
+// Rebinding M alone is no longer enough — when U holds, the guard never calls it — so this is a
+// BRANCH, not a widen: a different alias set with a different rebind list. A is rebound async
+// because the call site awaits it.
+//
+// The breakpoint must sit on the `if` STATEMENT, not inside its condition: a column that lands on
+// `await A(r)` would only be reached when U is true, and then M/P would go un-rebound on the other
+// path. `U` is captured out of the condition itself purely to anchor bpSubstr to that statement —
+// if this shape ever changes, U stops resolving and the gate reports a loud alias-not-found rather
+// than silently parking the breakpoint on some other `if(!(` in the window.
+export const GATE_BRIDGEMAIN_TOKENURL_ASYNC: GateSpec = {
+  id: 'bridgeMain.tokenurl',
+  windowAnchor: 'base URL uses HTTP',
+  windowBack: 4000,
+  windowFwd: 200,
+  aliases: {
+    M: 'getBridgeAccessToken:([\\w$]+),',
+    A: 'getBridgeAccessTokenAsync:([\\w$]+),',
+    P: 'getBridgeBaseUrl:([\\w$]+)\\}',
+    U: ';if\\(!\\(([\\w$]+)\\?await ',
+  },
+  bpSubstr: 'if(!(${U}?await ${A}(',
+  rebinds: [
+    '${M}=function(){return ${TOKEN}}',
+    '${A}=async function(){return ${TOKEN}}',
+    '${P}=function(){return ${URL}}',
+  ],
 };
 
 // ── bridgeMain: inline scheme check after `let U=P()`.
@@ -169,13 +206,20 @@ export const GATE_SPAWNER_SPAWN: GateSpec = {
   id: 'spawner.spawn',
   windowAnchor: '--replay-user-messages',
   windowBack: 0,
-  windowFwd: 1600,
+  windowFwd: 3600,
   // `{...,env:l,windowsHide:!0}` is the spawn options object. Match only up to the env
   // alias (`env:l,`) — as of 2.1.234 `windowsHide` sits at ~1204 bytes past the anchor,
   // so anchoring on it was fragile at the window edge (windowFwd used to be 1200 and cut
   // it off, breaking the whole headless child-rebind chain). `[,}]` after the alias is
   // enough to disambiguate the spawn env from `e.env` (which has no colon) and from the
   // long env-object literal above (whose keys are CLAUDE_CODE_*, never `env`).
+  //
+  // The SAME window-edge failure recurred on 2.1.239: the arg/env construction above grew and
+  // pushed `env:m` out to ~2007 bytes past the anchor, past the 1600 this had been widened to,
+  // and the gate went back to alias-not-found (empty partial — nothing matched at all).
+  // windowFwd is now 3600, which keeps the match at ~56% of the window. Measured on 2.1.241:
+  // `env:X[,}]` has exactly ONE hit anywhere in the first 5000 bytes after the anchor, so the
+  // extra room buys headroom without buying ambiguity.
   aliases: { L: 'env:([\\w$]+)[,}]' },
   // Break BEFORE the spawn call (the `.spawn(` site fires AFTER the child is already
   // spawned). The env object `l` is defined just before this debug log, so pausing here
@@ -184,17 +228,28 @@ export const GATE_SPAWNER_SPAWN: GateSpec = {
   rebinds: [], // handled specially (needs the child inspector port at runtime)
 };
 
+/** Which variant a profile uses for each gate that has drifted structurally. */
+export interface GateVariants {
+  /** dispatch.trust: LEGACY (two functions, ≤2.1.237) or PREFLIGHT (merged, ≥2.1.238). */
+  trust: GateSpec;
+  /** bridgeMain.tokenurl: SYNC (≤2.1.238) or ASYNC (second getter added, ≥2.1.239). */
+  tokenUrl: GateSpec;
+}
+
 /**
- * Assemble the 7 headless gates in canonical order, given which `dispatch.trust` variant this
- * profile uses. Profiles (profiles.ts) call this; the exported GATES below is the legacy set.
+ * Assemble the 7 headless gates in canonical order from a profile's variant choices. Profiles
+ * (profiles.ts) call this; the exported GATES below is the legacy set.
+ *
+ * Takes a named SET rather than positional GateSpecs on purpose: every variant has the same type,
+ * so two positional parameters would let a swapped call compile clean and fail only at runtime.
  */
-export function headlessGates(trustVariant: GateSpec): GateSpec[] {
+export function headlessGates(variants: GateVariants): GateSpec[] {
   return [
     GATE_DISPATCH_OAUTH,
     GATE_DISPATCH_POLICY,
-    trustVariant,
+    variants.trust,
     GATE_BRIDGEMAIN_TRUST,
-    GATE_BRIDGEMAIN_TOKENURL,
+    variants.tokenUrl,
     GATE_BRIDGEMAIN_HTTPSCHEME,
     GATE_SPAWNER_SPAWN,
   ];
@@ -204,7 +259,7 @@ export function headlessGates(trustVariant: GateSpec): GateSpec[] {
  * Backwards-compatible default gate set (legacy `dispatch.trust`). Kept so older callers and
  * `extract-anchors.ts` keep working; the version-aware paths take `profile.gates` instead.
  */
-export const GATES: GateSpec[] = headlessGates(GATE_DISPATCH_TRUST_LEGACY);
+export const GATES: GateSpec[] = headlessGates({ trust: GATE_DISPATCH_TRUST_LEGACY, tokenUrl: GATE_BRIDGEMAIN_TOKENURL_SYNC });
 
 /**
  * Child-process locator: the spawned `claude --print --sdk-url …` has its OWN gate —
@@ -342,7 +397,15 @@ export const INTERACTIVE_GATES: InteractiveGateSpec[] = [
   {
     id: 'int.preflight',
     locate: { anchorStr: 'Prerequisites passed, enabling bridge', declKeyword: 'async function' },
-    rebindRe: 'let [\\w$]+=await ([\\w$]+)\\(\\);if\\([\\w$]+\\)return\\{kind[^]*?let [\\w$]+=await ([\\w$]+)\\(\\);if\\([\\w$]+\\)return\\{kind[^]*?if\\(![\\w$]+\\(\\)\\)return\\{kind[^]*?await [\\w$]+\\(\\),await ([\\w$]+)\\(\\)',
+    // The login check and the side-effect call both drifted on 2.1.239 without changing what this
+    // gate does, so both assertions are widened rather than branched:
+    //   `if(!eF())return{kind`            → `if(!(Nt()&&e!==void 0?await iie(e):Wj()))return{kind`
+    //   `await Eei(),await G_n()`         → `await Eei(e),await vFn()`
+    // `if\(![^;]*?\)return\{kind` still asserts "a login check that returns {kind:…}" — it just no
+    // longer insists the check is a bare call — and `\([^)]*\)` lets either call take an argument.
+    // The async getter needs no rebind of its own: getBridgeAccessTokenAsync reads the same
+    // `wge()` override as the sync one (verified in the 2.1.241 bundle), which int.token owns.
+    rebindRe: 'let [\\w$]+=await ([\\w$]+)\\(\\);if\\([\\w$]+\\)return\\{kind[^]*?let [\\w$]+=await ([\\w$]+)\\(\\);if\\([\\w$]+\\)return\\{kind[^]*?if\\(![^;]*?\\)return\\{kind[^]*?await [\\w$]+\\([^)]*\\),await ([\\w$]+)\\([^)]*\\)',
     rebindValues: ['async function(){return null}', 'async function(){return null}', 'async function(){return !1}'],
     sticky: true,
   },

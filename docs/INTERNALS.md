@@ -68,13 +68,19 @@ spells out, and doing it *before* spawning made the launch 249ms → 427ms. So:
 - `gate-rebind.ts` starts the resolution **concurrently** with spawn + port-wait + attach, awaiting
   it at the locator (the first point that needs it), so even that fallback overlaps the launch.
 
-Most gates are shared across every version — only the ones that actually drifted carry variants in
-`anchors.ts` (named constants assembled by `headlessGates(trustVariant)`). Known drift so far:
+Most gates are shared across every version — only the ones that actually drifted **structurally**
+carry variants in `anchors.ts` (named constants assembled by `headlessGates({trust, tokenUrl})`).
+Drift that is merely cosmetic (a guard that gained a parameter, a match that slid past its window)
+is absorbed by widening the one gate instead, so it never reaches this table. Known drift so far:
 
-| profile | version range | `dispatch.trust` |
-|---|---|---|
-| `legacy` | 2.1.229 – 2.1.237 | two functions: `enrollTrustedDeviceIfNeeded` + `getTrustedDeviceUnenrolledReason` |
-| `preflight` | ≥ 2.1.238 | one function: `preflightTrustedDeviceBlocking` |
+| profile | version range | `dispatch.trust` | `bridgeMain.tokenurl` |
+|---|---|---|---|
+| `legacy` | 2.1.229 – 2.1.237 | two functions: `enrollTrustedDeviceIfNeeded` + `getTrustedDeviceUnenrolledReason` | one getter: `if(!M())` |
+| `preflight` | 2.1.238 only | one function: `preflightTrustedDeviceBlocking` | one getter: `if(!M())` |
+| `async-token` | ≥ 2.1.239 | same as `preflight` | two getters, chosen at runtime: `if(!(U?await A(r):M()))` — both rebound |
+
+A one-version profile like `preflight` is the expected shape, not a smell: 2.1.238 moved one guard
+and 2.1.239 moved the next one over.
 
 Selection is **optimistic and never refuses on the version number**: an unknown-newer claude gets
 the newest profile, an unknown-older one gets the oldest (logged as `optimistic-newer` /

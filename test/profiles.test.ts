@@ -47,15 +47,43 @@ test('selectProfile: exact matches within each profile range', () => {
     const { profile, note } = selectProfile('2.1.238');
     assert.equal(profile.id, 'preflight');
     assert.equal(note, 'exact');
-    // preflight uses the single-function gate (alias Z).
+    // preflight uses the single-function gate (alias Z)…
     const trust = profile.gates.find((g) => g.id === 'dispatch.trust')!;
     assert.deepEqual(Object.keys(trust.aliases), ['Z']);
+    // …but still the one-token-getter tokenurl gate.
+    const tokenUrl = profile.gates.find((g) => g.id === 'bridgeMain.tokenurl')!;
+    assert.deepEqual(Object.keys(tokenUrl.aliases).sort(), ['M', 'P']);
+  }
+  for (const v of ['2.1.239', '2.1.241']) {
+    const { profile, note } = selectProfile(v);
+    assert.equal(profile.id, 'async-token', `${v} → async-token`);
+    assert.equal(note, 'exact');
+    // async-token keeps preflight's trust gate…
+    const trust = profile.gates.find((g) => g.id === 'dispatch.trust')!;
+    assert.deepEqual(Object.keys(trust.aliases), ['Z']);
+    // …and swaps in the tokenurl gate that also rebinds getBridgeAccessTokenAsync.
+    const tokenUrl = profile.gates.find((g) => g.id === 'bridgeMain.tokenurl')!;
+    assert.deepEqual(Object.keys(tokenUrl.aliases).sort(), ['A', 'M', 'P', 'U']);
+    assert.equal(tokenUrl.rebinds.length, 3);
+  }
+});
+
+test('the profile boundaries are contiguous — no version falls between two profiles', () => {
+  // Every profile's `since` must be reachable: sorted by since, each range is [since, next.since).
+  const sorted = [...PROFILES].sort((a, b) => compareVersion(a.since, b.since));
+  for (const p of sorted) {
+    assert.equal(selectProfile(p.since).profile.id, p.id, `${p.since} must select ${p.id}`);
+    // verifiedThrough, where set, must still land inside the profile it belongs to.
+    if (p.verifiedThrough) {
+      assert.equal(selectProfile(p.verifiedThrough).profile.id, p.id, `${p.verifiedThrough} → ${p.id}`);
+      assert.ok(compareVersion(p.verifiedThrough, p.since) >= 0, `${p.id}: verifiedThrough >= since`);
+    }
   }
 });
 
 test('selectProfile: optimistic-newer picks the newest profile for unknown-newer versions', () => {
   const { profile, note } = selectProfile('2.1.999');
-  assert.equal(profile.id, 'preflight');
+  assert.equal(profile.id, 'async-token');
   assert.equal(note, 'optimistic-newer');
   assert.equal(profile.id, newestProfile().id);
 });

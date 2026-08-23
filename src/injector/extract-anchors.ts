@@ -36,6 +36,10 @@ const PROBES: Probe[] = [
   { name: 'gate.onlyApiAnthropic', needle: 'only available when using Claude via api.anthropic.com', radius: 160 },
   // ── createBridgeSession: unique tail `reuse_outcome_branches:!0` sits next to the guards
   { name: 'session.createBridge', needle: 'reuse_outcome_branches', radius: 1600 },
+  // ── spawner: child argv → env object → `.spawn(…,{env:X,windowsHide:!0})`. Radius is generous
+  // because this region is where the window-edge drifts keep happening (2.1.234, 2.1.239): the
+  // whole point is to see how far `env:X` has slid from the `--replay-user-messages` anchor.
+  { name: 'spawner.region', needle: '--replay-user-messages', radius: 3600 },
   // ── export-table name maps (reveal minified locals: NAME:()=>MINIFIED)
   { name: 'exp.bridge', needle: 'getBridgeBaseUrl:()=>', radius: 220 },
   { name: 'exp.isFirstPartyProvider', needle: 'isFirstPartyProvider:()=>', radius: 40 },

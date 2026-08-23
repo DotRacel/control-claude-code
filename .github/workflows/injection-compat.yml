@@ -43,9 +43,11 @@ concurrency:
 
 jobs:
   # Compute the version list: the manual single-version input if given, else the full matrix.
-  # The matrix spans both profiles' ranges: legacy floor (2.1.229), a mid point (2.1.232), the
-  # spawner-fix point (2.1.234), the legacy ceiling (2.1.237), the preflight floor (2.1.238), and
-  # whatever `latest` is today. All are real published tags (2.1.230 was never published).
+  # The matrix spans every profile's range: legacy floor (2.1.229), a mid point (2.1.232), the
+  # spawner-fix point (2.1.234), the legacy ceiling (2.1.237), the preflight floor+ceiling
+  # (2.1.238 — a one-version profile), the async-token floor (2.1.239) and its verified ceiling
+  # (2.1.241), and whatever `latest` is today. All are real published tags (2.1.230 was never
+  # published). Both floors are pinned because that is where a too-wide `since` shows up.
   matrix:
     runs-on: ubuntu-latest
     outputs:
@@ -56,7 +58,7 @@ jobs:
           if [ -n "${{ github.event.inputs.claude_version }}" ]; then
             echo 'versions=["${{ github.event.inputs.claude_version }}"]' >> "$GITHUB_OUTPUT"
           else
-            echo 'versions=["2.1.229","2.1.232","2.1.234","2.1.237","2.1.238","latest"]' >> "$GITHUB_OUTPUT"
+            echo 'versions=["2.1.229","2.1.232","2.1.234","2.1.237","2.1.238","2.1.239","2.1.241","latest"]' >> "$GITHUB_OUTPUT"
           fi
 
   verify:
