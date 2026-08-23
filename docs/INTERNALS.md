@@ -54,8 +54,19 @@ got past locating the file before this fix.
 The runtime string/structural anchors absorb a release's minified-**name** churn, but not a
 change to a guard's **code shape**. So the gate set is **version-profiled**: `src/injector/
 profiles.ts` defines `PROFILES`, each a gate set for a version range, and the injector detects the
-claude version at launch (`detectClaudeVersion` → `claude --version`) and picks one
-(`selectProfile`). `gate-rebind.ts` then locates/rebinds that profile's gates.
+claude version at launch (`detectClaudeVersion`) and picks one (`selectProfile`). `gate-rebind.ts`
+then locates/rebinds that profile's gates.
+
+Detection stays **off the launch's critical path**, deliberately. `claude --version` means booting
+a ~340MB Bun binary (120–270ms warm, worse cold) to print a string the install layout already
+spells out, and doing it *before* spawning made the launch 249ms → 427ms. So:
+
+- `versionFromInstall` reads it from the filesystem instead — the native installer's
+  `bin/claude → share/claude/versions/<x.y.z>` symlink, or the npm layout's `package.json`. Both
+  are matched strictly; anything else returns null rather than guessing.
+- only an unrecognised layout falls back to spawning `--version`, and
+- `gate-rebind.ts` starts the resolution **concurrently** with spawn + port-wait + attach, awaiting
+  it at the locator (the first point that needs it), so even that fallback overlaps the launch.
 
 Most gates are shared across every version — only the ones that actually drifted carry variants in
 `anchors.ts` (named constants assembled by `headlessGates(trustVariant)`). Known drift so far:

@@ -10,7 +10,10 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseVersion, compareVersion, selectProfile, newestProfile, PROFILES } from '../src/injector/profiles.ts';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { parseVersion, compareVersion, selectProfile, newestProfile, PROFILES, versionFromInstall, detectClaudeVersion } from '../src/injector/profiles.ts';
 
 test('parseVersion extracts x.y.z from various shapes', () => {
   assert.deepEqual(parseVersion('2.1.238'), [2, 1, 238]);
@@ -85,4 +88,80 @@ test('every profile carries the full headless + interactive gate sets', () => {
     // dispatch.trust is present exactly once in every profile.
     assert.equal(p.gates.filter((g) => g.id === 'dispatch.trust').length, 1);
   }
+});
+
+// ── version detection off the install layout (no `claude --version` spawn) ────────────────
+//
+// The probe used to shell out to a ~340MB Bun binary on every launch, on the critical path.
+// versionFromInstall reads what the filesystem already spells out; these fix the two layouts
+// it recognises AND the strictness that sends anything else back to the `--version` fallback.
+
+/** Build a throwaway install tree under a temp dir; returns its root. */
+function makeInstall(build: (root: string) => void): string {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ccc-install-'));
+  fs.mkdirSync(path.join(root, 'bin'), { recursive: true });
+  build(root);
+  return root;
+}
+
+test('versionFromInstall reads the native installer layout (bin/claude → versions/x.y.z)', () => {
+  const root = makeInstall((r) => {
+    fs.mkdirSync(path.join(r, 'share/claude/versions'), { recursive: true });
+    fs.writeFileSync(path.join(r, 'share/claude/versions/2.1.241'), '#!/bin/sh\n', { mode: 0o755 });
+    fs.symlinkSync(path.join(r, 'share/claude/versions/2.1.241'), path.join(r, 'bin/claude'));
+  });
+  try {
+    assert.equal(versionFromInstall(path.join(root, 'bin/claude')), '2.1.241');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('versionFromInstall reads the npm global layout (package.json beside cli.js)', () => {
+  const root = makeInstall((r) => {
+    const pkgDir = path.join(r, 'lib/node_modules/@anthropic-ai/claude-code');
+    fs.mkdirSync(pkgDir, { recursive: true });
+    fs.writeFileSync(path.join(pkgDir, 'cli.js'), '#!/usr/bin/env node\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ name: '@anthropic-ai/claude-code', version: '2.1.237' }));
+    fs.symlinkSync(path.join(pkgDir, 'cli.js'), path.join(r, 'bin/claude'));
+  });
+  try {
+    assert.equal(versionFromInstall(path.join(root, 'bin/claude')), '2.1.237');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('versionFromInstall refuses to guess from an unrecognised layout', () => {
+  const root = makeInstall((r) => {
+    // A plain binary in a dir named nothing like a version, and a package.json for a DIFFERENT
+    // package — neither may be read as claude's version.
+    fs.writeFileSync(path.join(r, 'bin/claude'), '#!/bin/sh\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(r, 'bin/package.json'), JSON.stringify({ name: 'some-wrapper', version: '9.9.9' }));
+  });
+  try {
+    assert.equal(versionFromInstall(path.join(root, 'bin/claude')), null);
+    assert.equal(versionFromInstall(path.join(root, 'bin/does-not-exist')), null);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('detectClaudeVersion answers from the layout without executing the binary', async () => {
+  // The "binary" is a text file with no exec bit — spawning it could only fail. Getting the
+  // version back therefore proves the filesystem path answered, i.e. no launch on the hot path.
+  const root = makeInstall((r) => {
+    fs.mkdirSync(path.join(r, 'share/claude/versions'), { recursive: true });
+    fs.writeFileSync(path.join(r, 'share/claude/versions/2.1.230'), 'not a program', { mode: 0o644 });
+    fs.symlinkSync(path.join(r, 'share/claude/versions/2.1.230'), path.join(r, 'bin/claude'));
+  });
+  try {
+    assert.equal(await detectClaudeVersion(path.join(root, 'bin/claude')), '2.1.230');
+    // …and it feeds selection the same way a `--version` string would.
+    assert.equal(selectProfile('2.1.230').profile.id, 'legacy');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('detectClaudeVersion falls back to the probe, and stays null when it cannot run', async () => {
+  const root = makeInstall((r) => {
+    fs.writeFileSync(path.join(r, 'bin/claude'), 'not a program', { mode: 0o644 });
+  });
+  try {
+    // Unrecognised layout → the `--version` fallback runs → non-executable file → null, no throw.
+    assert.equal(await detectClaudeVersion(path.join(root, 'bin/claude')), null);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

@@ -16,6 +16,8 @@
  * the fix is to add a gate variant in anchors.ts and a new profile entry here.
  */
 import { execFile } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   type GateSpec,
   type InteractiveGateSpec,
@@ -109,11 +111,73 @@ export function newestProfile(): InjectionProfile {
   return [...PROFILES].sort((a, b) => compareVersion(a.since, b.since))[PROFILES.length - 1];
 }
 
+/** A bare semver name, as the native installer names a version directory: "2.1.241". */
+const BARE_VERSION = /^v?(\d+\.\d+\.\d+)$/;
+
+/** Resolve `claudeBin` to a path the way execFile would — a bare name is looked up on PATH. */
+function resolveBinPath(claudeBin: string): string | null {
+  try {
+    if (claudeBin.includes('/') || claudeBin.includes(path.sep)) {
+      const abs = path.resolve(claudeBin);
+      return fs.statSync(abs).isFile() ? abs : null;
+    }
+    for (const dir of (process.env.PATH || '').split(path.delimiter)) {
+      if (!dir) continue;
+      const abs = path.join(dir, claudeBin);
+      try {
+        if (!fs.statSync(abs).isFile()) continue;
+        fs.accessSync(abs, fs.constants.X_OK);
+        return abs;
+      } catch { /* not this PATH entry */ }
+    }
+  } catch { /* unreadable PATH entry / bad bin */ }
+  return null;
+}
+
 /**
- * Run `<claudeBin> --version` and return the raw version string (e.g. "2.1.238 (Claude Code)"),
- * or null if it can't be determined. Never throws — a probe failure just means "undetected".
+ * Read the version off the INSTALL LAYOUT, with no process spawn.
+ *
+ * `claude --version` costs a full launch of a ~340MB Bun binary (measured 120-270ms warm, worse
+ * on a cold page cache) purely to print a string the filesystem already spells out:
+ *   - native installer: `bin/claude` → `share/claude/versions/<x.y.z>`  (basename IS the version)
+ *   - npm global:       `bin/claude` → `lib/node_modules/@anthropic-ai/claude-code/cli.js`
+ *                       (its package.json carries the version)
+ * Both are checked strictly — a basename that is not bare semver, or a package.json that is not
+ * claude-code's, returns null so the caller falls back to the authoritative `--version` probe.
+ */
+export function versionFromInstall(claudeBin: string): string | null {
+  const bin = resolveBinPath(claudeBin);
+  if (!bin) return null;
+  let real: string;
+  try { real = fs.realpathSync(bin); } catch { return null; }
+
+  const m = BARE_VERSION.exec(path.basename(real));
+  if (m) return m[1];
+
+  // npm layout: package.json sits beside cli.js (one level up covers a bin/ subdir).
+  let dir = path.dirname(real);
+  for (let i = 0; i < 2; i++) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
+      if (/claude-code/.test(String(pkg?.name ?? '')) && /^\d+\.\d+\.\d+/.test(String(pkg?.version ?? ''))) {
+        return String(pkg.version);
+      }
+    } catch { /* no/unreadable package.json here */ }
+    dir = path.dirname(dir);
+  }
+  return null;
+}
+
+/**
+ * Return the claude version string, or null if it can't be determined. Never throws — a probe
+ * failure just means "undetected".
+ *
+ * Tries the free filesystem read first (`versionFromInstall`) and only spawns
+ * `<claudeBin> --version` for an install layout we don't recognise.
  */
 export function detectClaudeVersion(claudeBin: string): Promise<string | null> {
+  const fromInstall = versionFromInstall(claudeBin);
+  if (fromInstall) return Promise.resolve(fromInstall);
   return new Promise((resolve) => {
     execFile(claudeBin, ['--version'], { timeout: 8000 }, (err, stdout) => {
       if (err) return resolve(null);
