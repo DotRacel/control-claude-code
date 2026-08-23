@@ -96,6 +96,44 @@ When that CI goes red — a release drifted a gate — [INJECTION-DRIFT-RUNBOOK.
 is the step-by-step: read the error string, get the binary, find the new code shape, decide
 widen-vs-branch, write the gate, reprofile, and verify (locate *and* rebind).
 
+## Launch cost
+
+A gate-rebound launch reaches "gates located, app released" in **~60ms** (interactive 66ms, headless
+57ms, host claude 2.1.241). Worth knowing where it goes, because almost everything that made it slow
+was waiting rather than working:
+
+| phase | cost |
+|---|---|
+| two ephemeral ports (concurrent) | ~4ms |
+| spawn → `BUN_INSPECT` port listening | ~15ms |
+| websocket connect + 4 domain enables | ~4ms |
+| locator: read the bundle, resolve every gate | ~35ms |
+| set 7 breakpoints + `Inspector.initialized` | ~3ms |
+
+Three rules keep it there, all of them learned by measuring rather than reasoning:
+
+**Never put a fixed sleep on the critical path.** Two flat poll intervals — `waitForPort` at 80ms
+and a 120ms first sleep before reading the locator's result — accounted for ~135ms of a 240ms
+launch, waiting on work that had already finished in 15ms and 50ms respectively. Both now ramp from
+2ms. Polling the inspector this fast is self-throttling, not wasteful: the target answers our
+read-back on the same thread that runs the locator, so a poll issued mid-work simply doesn't return
+until the work is done.
+
+**The bundle is ~28MB / 60k lines — never scan it more than once for the same thing.** `findAnchor`
+memoises `s.indexOf`, because the 7 headless gates share only 4 distinct window anchors and the
+most-repeated one sits near the end of the file (~9ms per scan). `absLineCol` binary-searches one
+newline-offset table instead of `s.slice(0, idx).split("\n")` per gate, which copied up to 28MB and
+allocated a 60k-element array each time. Together: ~50ms off the locator.
+
+**Detection reads the filesystem, not a process.** See the note under
+[Version-profiled injection](#version-profiled-injection) — `claude --version` costs a full boot of
+a ~340MB binary, and it is resolved concurrently with the launch besides.
+
+What is left is mostly real work: the bundle read is ~2ms (bunfs is mapped, not copied), and the
+rest is the regex matching each gate needs. The interactive locator is the slower of the two because
+three of its gates resolve through export-table regexes that each scan the whole bundle — that is
+the next thing to attack if this ever needs to be faster, and it is worth maybe 15ms.
+
 ## Layout
 
 ```

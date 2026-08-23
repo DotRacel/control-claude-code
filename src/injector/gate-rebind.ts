@@ -18,7 +18,7 @@
 import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import crypto from 'node:crypto';
 import { InspectorClient } from './ws-client.ts';
-import { getFreePort, waitForPort, treeKiller, DEFAULT_CLAUDE } from './attach.ts';
+import { getFreePort, waitForPort, runLocator, treeKiller, DEFAULT_CLAUDE } from './attach.ts';
 import { fill, buildLocatorExpr, buildInteractiveLocatorExpr, buildChildLocatorExpr, childDhsRebind, type RebindConfig } from './anchors.ts';
 import { newestProfile, resolveProfile, type ResolvedProfile } from './profiles.ts';
 
@@ -96,12 +96,7 @@ async function attachChildAndRebind(childPort: number, childWsUrl: string, log: 
   await cic.send('Runtime.evaluate', { expression: 'try{delete process.env.BUN_INSPECT}catch(e){}; "ok"', returnByValue: true }).catch(() => {});
 
   const CKEY = '__ccChildGate';
-  await cic.send('Runtime.evaluate', { expression: buildChildLocatorExpr(CKEY), returnByValue: true });
-  let loc: any = 'pending';
-  for (let i = 0; i < 40 && loc === 'pending'; i++) {
-    await new Promise((r) => setTimeout(r, 120));
-    loc = rval(await cic.send('Runtime.evaluate', { expression: `globalThis[${JSON.stringify(CKEY)}]`, returnByValue: true }));
-  }
+  const loc = await runLocator(cic, buildChildLocatorExpr(CKEY), CKEY);
   if (!loc || typeof loc !== 'object' || !loc.main || !loc.dHs || loc.bpLine == null) {
     log('[child] gate locate failed: ' + JSON.stringify(loc) + ' — releasing anyway');
     await cic.send('Inspector.initialized').catch(() => {});
@@ -147,15 +142,19 @@ export async function launchWithGatesRebound(opts: GateRebindOpts): Promise<Gate
   // (see profiles.ts). Resolved CONCURRENTLY with the launch and awaited at the locator below.
   const profileP = startProfileResolution(claudeBin);
 
-  const port = await getFreePort();
+  // Both inspector ports at once — ours and the one we pre-allocate for the child claude that
+  // bridgeMain will spawn (on the spawner.spawn gate we inject BUN_INSPECT=<childInspectUrl> into
+  // its env, then attach + rebind its own --sdk-url allowlist gate).
+  //
+  // Concurrently, not in sequence: each probe binds :0, reads the port, and closes. Run one after
+  // the other, both are closed when the second binds and the OS is free to hand back the same
+  // number twice. Held open together they cannot collide — so this is the safer order as well as
+  // the faster one.
+  const [port, childPort] = await Promise.all([getFreePort(), getFreePort()]);
   const token = '/cc-' + crypto.randomBytes(6).toString('hex');
   const wsUrl = `ws://127.0.0.1:${port}${token}`;
   const env = { ...process.env, ...extraEnv, BUN_INSPECT: wsUrl + '?wait=1' };
 
-  // Pre-allocate an inspector port for the child claude that bridgeMain will spawn.
-  // On the spawner.spawn gate we inject BUN_INSPECT=<childInspectUrl> into the child env,
-  // then attach + rebind the child's own --sdk-url allowlist gate.
-  const childPort = await getFreePort();
   const childToken = '/cc-child-' + crypto.randomBytes(4).toString('hex');
   const childInspectUrl = `ws://127.0.0.1:${childPort}${childToken}?wait=1`;
   const childWsUrl = `ws://127.0.0.1:${childPort}${childToken}`;
@@ -189,12 +188,7 @@ export async function launchWithGatesRebound(opts: GateRebindOpts): Promise<Gate
     const { profile, version, note } = await profileP;
     log(`[gate] claude version=${version ?? '(undetected)'} → profile=${profile.id} (${note})`);
     const GKEY = '__ccGates';
-    await ic.send('Runtime.evaluate', { expression: buildLocatorExpr(GKEY, profile.gates), returnByValue: true });
-    let located: any = 'pending';
-    for (let i = 0; i < 40 && located === 'pending'; i++) {
-      await new Promise((r) => setTimeout(r, 120));
-      located = rval(await ic.send('Runtime.evaluate', { expression: `globalThis[${JSON.stringify(GKEY)}]`, returnByValue: true }));
-    }
+    const located = await runLocator(ic, buildLocatorExpr(GKEY, profile.gates), GKEY);
     if (!located || typeof located !== 'object' || !located.main || !Array.isArray(located.gates)) {
       throw new Error(`gate locator failed: ${JSON.stringify(located)}`);
     }
@@ -388,12 +382,7 @@ export async function launchInteractiveWithGatesRebound(opts: InteractiveLaunchO
     const { profile, version, note } = await profileP;
     log(`[int] claude version=${version ?? '(undetected)'} → profile=${profile.id} (${note})`);
     const GKEY = '__ccIntGates';
-    await ic.send('Runtime.evaluate', { expression: buildInteractiveLocatorExpr(GKEY, profile.interactiveGates), returnByValue: true });
-    let located: any = 'pending';
-    for (let i = 0; i < 40 && located === 'pending'; i++) {
-      await new Promise((r) => setTimeout(r, 120));
-      located = rval(await ic.send('Runtime.evaluate', { expression: `globalThis[${JSON.stringify(GKEY)}]`, returnByValue: true }));
-    }
+    const located = await runLocator(ic, buildInteractiveLocatorExpr(GKEY, profile.interactiveGates), GKEY);
     if (!located || typeof located !== 'object' || !located.main || !Array.isArray(located.gates)) {
       throw new Error(`interactive gate locator failed: ${JSON.stringify(located)}`);
     }

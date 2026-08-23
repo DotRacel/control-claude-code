@@ -25,7 +25,7 @@
  * Run:  node test/verify-injection.ts            # CLAUDE_BIN=claude by default
  *       CCC_VERBOSE=1 node test/verify-injection.ts   # stream claude stderr while probing
  */
-import { launchAndAttach, type AttachHandle } from '../src/injector/attach.ts';
+import { launchAndAttach, runLocator, type AttachHandle } from '../src/injector/attach.ts';
 import {
   buildLocatorExpr,
   buildInteractiveLocatorExpr,
@@ -33,21 +33,9 @@ import {
 } from '../src/injector/anchors.ts';
 import { resolveProfile } from '../src/injector/profiles.ts';
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const rval = (r: any) => (r && r.result ? ('value' in r.result ? r.result.value : r.result) : undefined);
-
 /** Evaluate a locator expression, then poll the global it stashes its result on. */
-async function locate(ic: AttachHandle['ic'], expr: string, key: string): Promise<any> {
-  await ic
-    .send('Runtime.evaluate', { expression: expr, returnByValue: true }, { timeoutMs: 25000 })
-    .catch((e: any) => 'ERR:' + e.message);
-  let out: any = 'pending';
-  for (let i = 0; i < 60 && out === 'pending'; i++) {
-    await sleep(200);
-    out = rval(await ic.send('Runtime.evaluate', { expression: `globalThis[${JSON.stringify(key)}]`, returnByValue: true }));
-  }
-  return out;
-}
+const locate = (ic: AttachHandle['ic'], expr: string, key: string): Promise<any> =>
+  runLocator(ic, expr, key, { timeoutMs: 12000, kickTimeoutMs: 25000 });
 
 interface Row {
   id: string;

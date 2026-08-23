@@ -256,6 +256,36 @@ export function headlessGates(variants: GateVariants): GateSpec[] {
 }
 
 /**
+ * Shared preamble for every locator expression, injected into the target.
+ *
+ * Assumes the enclosing scope has already bound `s` to the bundle text. Both helpers exist because
+ * the naive forms are O(bundle) EACH TIME and the bundle is ~28MB / 60k lines (2.1.241):
+ *
+ *  - findAnchor memoises `s.indexOf(needle)`. The 7 headless gates share only 4 distinct window
+ *    anchors — `cli_bridge_path` alone is the anchor for 3 of them, and it sits near the END of the
+ *    bundle, so each repeat was a full ~9ms scan for a result we already had.
+ *  - absLineCol builds ONE newline-offset table (~5ms) and binary-searches it, replacing a
+ *    `s.slice(0, idx).split("\n")` per gate — that slice copies up to 28MB and the split allocates
+ *    a 60k-element array, ~30ms across 7 gates, to count newlines we can count once.
+ *
+ * The table is built lazily so a locator that never asks for a line/col never pays for it.
+ * Semantics are unchanged: `line` is the 0-based count of newlines before idx, and `col` is the
+ * offset from the last newline (or from 0 on the first line).
+ */
+const LOCATOR_PRELUDE = `
+        var __nl = null;
+        function lineTable(){ if (__nl) return __nl; __nl = []; for (var j = s.indexOf("\\n"); j >= 0; j = s.indexOf("\\n", j + 1)) __nl.push(j); return __nl; }
+        function absLineCol(idx){
+          var t = lineTable(), lo = 0, hi = t.length;
+          while (lo < hi) { var mid = (lo + hi) >> 1; if (t[mid] < idx) lo = mid + 1; else hi = mid; }
+          return { line: lo, col: lo === 0 ? idx : idx - (t[lo - 1] + 1) };
+        }
+        var __find = new Map();
+        function findAnchor(needle){ if (!__find.has(needle)) __find.set(needle, s.indexOf(needle)); return __find.get(needle); }
+        function totalLines(){ return lineTable().length + 1; }
+`;
+
+/**
  * Backwards-compatible default gate set (legacy `dispatch.trust`). Kept so older callers and
  * `extract-anchors.ts` keep working; the version-aware paths take `profile.gates` instead.
  */
@@ -276,10 +306,10 @@ export function buildChildLocatorExpr(globalKey: string): string {
       try {
         var MAIN = Bun.main;
         var s = await Bun.file(MAIN).text();
-        function lc(i){ var pre=s.slice(0,i); var nl=pre.lastIndexOf("\\n"); return { line: pre.split("\\n").length-1, col: i-(nl+1) }; }
-        var out = { main: MAIN, total_lines: s.split("\\n").length };
+        ${LOCATOR_PRELUDE}
+        var out = { main: MAIN, total_lines: totalLines() };
         // dHs name: locate uHs("--sdk-url"), walk back to the enclosing function name.
-        var si = s.indexOf('("--sdk-url")');
+        var si = findAnchor('("--sdk-url")');
         out.sdkUrlIdx = si;
         // NB: minified names can contain '$' (e.g. dHs = "l$s"), so match [\\w$]+ not \\w+.
         if (si >= 0) {
@@ -288,11 +318,11 @@ export function buildChildLocatorExpr(globalKey: string): string {
           out.dHs = mm ? mm[1] : null;
         } else out.dHs = null;
         // breakpoint: the \`let nn=cku(J);if(nn!==null)\` right before the reject telemetry.
-        var ci = s.indexOf("tengu_sdk_url_host_rejected");
+        var ci = findAnchor("tengu_sdk_url_host_rejected");
         if (ci >= 0) {
           var back = s.slice(ci - 240, ci);
           var m2 = /let [\\w$]+=[\\w$]+\\([^)]*\\);if\\([\\w$]+!==null\\)/.exec(back);
-          if (m2) { var abs = ci - 240 + back.indexOf(m2[0]); var p = lc(abs); out.bpLine = p.line; out.bpCol = p.col; }
+          if (m2) { var abs = ci - 240 + back.indexOf(m2[0]); var p = absLineCol(abs); out.bpLine = p.line; out.bpCol = p.col; }
         }
         globalThis[${K}] = out;
       } catch (e) { globalThis[${K}] = "ERR:" + (e && e.message || e); }
@@ -328,12 +358,12 @@ export function buildLocatorExpr(globalKey: string, gates: GateSpec[] = GATES): 
         var MAIN = Bun.main;
         var s = await Bun.file(MAIN).text();
         var GATES = ${GATES_JSON};
-        function absLineCol(idx){ var pre = s.slice(0, idx); var nl = pre.lastIndexOf("\\n"); return { line: pre.split("\\n").length - 1, col: idx - (nl + 1) }; }
+        ${LOCATOR_PRELUDE}
         function fillLocal(t, vars){ return t.replace(/\\$\\{(\\w+)\\}/g, function(_, k){ return (k in vars) ? vars[k] : ("\\${"+k+"}"); }); }
         var out = [];
         for (var gi = 0; gi < GATES.length; gi++) {
           var G = GATES[gi];
-          var anchorIdx = s.indexOf(G.windowAnchor);
+          var anchorIdx = findAnchor(G.windowAnchor);
           if (anchorIdx < 0) { out.push({ id: G.id, error: "anchor-not-found" }); continue; }
           var start = Math.max(0, anchorIdx - G.windowBack);
           var win = s.slice(start, anchorIdx + G.windowFwd);
@@ -463,7 +493,7 @@ export function buildInteractiveLocatorExpr(globalKey: string, gates: Interactiv
         var MAIN = Bun.main;
         var s = await Bun.file(MAIN).text();
         var GATES = ${GATES_JSON};
-        function absLineCol(idx){ var pre = s.slice(0, idx); var nl = pre.lastIndexOf("\\n"); return { line: pre.split("\\n").length - 1, col: idx - (nl + 1) }; }
+        ${LOCATOR_PRELUDE}
         function expName(n){ var m = new RegExp(n + ":\\\\(\\\\)=>([\\\\w$]+)").exec(s); return m ? m[1] : null; }
         var out = [];
         for (var gi = 0; gi < GATES.length; gi++) {
@@ -473,7 +503,7 @@ export function buildInteractiveLocatorExpr(globalKey: string, gates: Interactiv
             if (!alias) { out.push({ id: G.id, error: "export-not-found" }); continue; }
             di = s.indexOf("function " + alias + "(");
           } else {
-            var ai = s.indexOf(G.locate.anchorStr);
+            var ai = findAnchor(G.locate.anchorStr);
             if (ai < 0) { out.push({ id: G.id, error: "anchor-not-found" }); continue; }
             di = s.lastIndexOf(G.locate.declKeyword, ai);
             var dm = /([\\w$]+)\\(/.exec(s.slice(di + G.locate.declKeyword.length, di + G.locate.declKeyword.length + 40));

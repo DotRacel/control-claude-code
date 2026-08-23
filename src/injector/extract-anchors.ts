@@ -17,7 +17,7 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { launchAndAttach } from './attach.ts';
+import { launchAndAttach, runLocator } from './attach.ts';
 
 // Each probe: a human name + the literal to search for + which occurrence + context radius.
 // occ:-1 means "return every occurrence" (line/col only, no ctx, to disambiguate dupes).
@@ -80,8 +80,6 @@ function buildProbeExpr(probes: Probe[], globalKey: string): string {
     "kicked";`;
 }
 
-const rval = (r: any) => (r && r.result ? ('value' in r.result ? r.result.value : r.result) : undefined);
-
 async function main() {
   const claudeBin = process.env.CLAUDE_BIN || 'claude';
   const GLOBAL_KEY = '__ccExtract';
@@ -94,14 +92,7 @@ async function main() {
     onStderr: (b) => process.env.CCC_VERBOSE && process.stderr.write(b),
   });
   try {
-    const ev = (expr: string) => h.ic.send('Runtime.evaluate', { expression: expr, returnByValue: true }, { timeoutMs: 25000 }).then(rval).catch((e) => 'ERR:' + e.message);
-    await ev(buildProbeExpr(PROBES, GLOBAL_KEY));
-    let out: any = 'pending';
-    for (let i = 0; i < 40; i++) {
-      await new Promise((r) => setTimeout(r, 400));
-      out = await ev(`globalThis[${JSON.stringify(GLOBAL_KEY)}]`);
-      if (out !== 'pending') break;
-    }
+    const out = await runLocator(h.ic, buildProbeExpr(PROBES, GLOBAL_KEY), GLOBAL_KEY, { timeoutMs: 16000, kickTimeoutMs: 25000 });
     if (typeof out !== 'object' || !out) {
       console.error('[extract] FAILED:', out);
       process.exitCode = 1;
