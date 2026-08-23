@@ -31,6 +31,7 @@ import {
   CONFIG_DIR, CONFIG_FILE, DEFAULT_BACKEND, loadConfig, saveConfig, findBackend, checkToken,
   normalizeUrl, runLoginFlow, legacyCredentialNotice,
 } from './cli-auth.ts';
+import { VERSION, loadCheckState, updateNotice, refreshInBackground } from './update-check.ts';
 
 const DEFAULT_LOG_DIR = path.join(CONFIG_DIR, 'logs');
 const KEEP_RUNS = 20; // how many past runs' logs to keep in the log dir
@@ -124,7 +125,7 @@ export function parseArgs(argv: string[]): Cli {
 }
 
 function printHelp() {
-  console.log(`control-claude — 用手机远程控制本机的 claude（BYOK 也能用）
+  console.log(`control-claude \x1b[2mv${VERSION}\x1b[0m — 用手机远程控制本机的 claude（BYOK 也能用）
 
 用法:
   control-claude [控制器选项] [claude 的参数...]
@@ -151,7 +152,8 @@ ${CONFIG_FILE}，之后直接启动。随时可用 \x1b[1m--login\x1b[0m 重新�
   -h, --help            显示本帮助
 
 环境变量: CCC_SERVER CCC_CREDENTIAL CCC_LOG_DIR CLAUDE_BIN CCC_VERBOSE CCC_CLAUDE_DEBUG
-          CCC_NO_PROCESS_TITLE=1  不把宿主进程改名为 claude（tmux/screen 的窗口名会显示 node）`);
+          CCC_NO_PROCESS_TITLE=1  不把宿主进程改名为 claude（tmux/screen 的窗口名会显示 node）
+          CCC_NO_UPDATE_CHECK=1   不检查新版本（不打提示，也不访问 npm registry）`);
 }
 
 /**
@@ -272,10 +274,22 @@ async function main() {
   const logDir = path.resolve(cli.logDir || process.env.CCC_LOG_DIR || DEFAULT_LOG_DIR);
 
   const logger = createLogger(logDir);
+  // Our own version first: a bug report's log should say which control-claude produced it, next to
+  // the claude version the injector reports later.
+  logger.log(`[cli] control-claude v${VERSION} node=${process.version}`);
   logger.log(`[cli] argv=${JSON.stringify(process.argv.slice(2))}`);
   // Before anything long-running: tmux/screen read our argv for the window name (see above).
   logger.log(`[cli] process.title=${JSON.stringify(alignProcessTitle())}`);
   logger.log(`[cli] mode=${cli.headless ? 'headless' : 'interactive'} server=${serverUrl} cwd=${cwd} bin=${claudeBin} claudeArgs=${JSON.stringify(cli.claudeArgs)}`);
+
+  /*
+   * Last chance to print anything: in interactive mode claude's TUI owns the terminal from the
+   * next statement on. The notice is whatever the cache already knew (no network on this path);
+   * the refresh below lands in time for the next launch. See src/update-check.ts.
+   */
+  const notice = updateNotice(VERSION, loadCheckState());
+  if (notice) console.log(`\n${notice}\n`);
+  void refreshInBackground(); // deliberately not awaited — see the file header
 
   const ctx: RunCtx = { claudeBin, cwd, serverUrl, credential, claudeArgs: cli.claudeArgs, logger };
   try {

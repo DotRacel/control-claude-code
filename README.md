@@ -18,6 +18,10 @@ npm i -g control-claude-code     # or: npx control-claude-code
 
 The package is `control-claude-code`; the command it installs is `control-claude`.
 
+A launch asks npm for a newer version at most once a day, in the background, and the one-line
+notice shows up on the *next* launch — claude's TUI owns the terminal, so anything we print has to
+be on screen before it starts. `CCC_NO_UPDATE_CHECK=1` turns off both the notice and the request.
+
 ## Use
 
 ```bash

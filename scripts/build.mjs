@@ -8,13 +8,22 @@
  *
  * `--target=node22` is the floor advertised in `engines`; keep the two in sync.
  */
-import { chmodSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import esbuild from 'esbuild';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outfile = path.join(root, 'dist', 'cli.mjs');
+
+/*
+ * The version is baked in rather than read at runtime. `dist/cli.mjs` sits at a different depth
+ * relative to its package.json depending on whether it was installed globally, unpacked into an
+ * npx cache, or run from the repo, so a walk-up-and-parse is a layout guess that fails quietly.
+ * A `define` cannot be wrong. src/update-check.ts reads it through `typeof`, so a source checkout
+ * (where esbuild never ran) still works and reports itself as a source build.
+ */
+const { version } = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
 
 mkdirSync(path.dirname(outfile), { recursive: true });
 
@@ -25,6 +34,7 @@ const result = await esbuild.build({
   platform: 'node',
   target: 'node22',
   format: 'esm',
+  define: { __CCC_VERSION__: JSON.stringify(version) },
   // Bare `node:` specifiers stay external automatically on platform=node; nothing else is imported.
   legalComments: 'none',
   logLevel: 'info',
@@ -43,4 +53,4 @@ writeFileSync(outfile, `#!/usr/bin/env node\n${body}`);
 chmodSync(outfile, 0o755); // npm sets the bit on install, but keep the built file runnable in-tree
 
 const kb = (statSync(outfile).size / 1024).toFixed(1);
-console.log(`built dist/cli.mjs (${kb} KB)`);
+console.log(`built dist/cli.mjs (${kb} KB, v${version})`);
