@@ -36,9 +36,10 @@ expect most of them to be widens.
 
 ## 1. Read the signal
 
-CI red: open the failed `injection-compat` job — the matrix leg is named by version
-(`verify (2.1.239)`), so you already know **which build** drifted. The step log prints the
-per-gate table and the failing ids.
+CI red: open the failed `injection-compat` job. Unattended runs check **`latest` only**, so the
+build that drifted is whatever `npm view @anthropic-ai/claude-code version` says today — the step
+log prints it, along with the per-gate table and the failing ids. (A `workflow_dispatch` run names
+the version you gave it in the leg.)
 
 The **error string is the diagnosis** — it tells you which layer of the gate broke:
 
@@ -209,14 +210,18 @@ known range to the gates that match it.
 
 ## 8. Verify — locate is not enough
 
-1. **Locate, on the new build and its neighbours:**
+1. **Locate, on the new build AND downward.** Unattended CI watches `latest` only, so this step is
+   the *only* thing standing between a widened regex and a silently broken older profile — nothing
+   will catch it for you later.
    ```bash
-   for v in <new> <new-1> <one-old>; do
+   for v in <new> <new-1> <oldest-in-each-surviving-profile>; do
      CLAUDE_BIN=~/.local/share/claude/versions/$v node test/verify-injection.ts | grep -E 'profile:|PASS|FAIL'
    done
    ```
-   The new version must go green on the new profile **and** an older version must still pick the old
-   profile and stay green (no regression from a too-wide `since`).
+   The new version must go green on the new profile **and** every older profile's floor must still
+   pick that older profile and stay green — no regression from a too-wide `since`, and none from a
+   loosened regex on a shared gate (see the DOWNWARD note in the appendix). Versions you don't have
+   locally: step 2 installs any published tag into a throwaway dir.
 2. **Unit tests:** `npm test` — `test/profiles.test.ts` covers the selection logic; add a case for
    the new boundary.
 3. **Rebind, on real metal:** `verify-injection` proves a gate *locates*, not that its rebind
@@ -236,14 +241,15 @@ known range to the gates that match it.
    child's `--sdk-url` gate is rebound and *used*. It reports its six links in order, so a red run
    tells you which one broke — and if a gate merely failed to locate it says so and sends you back
    here rather than blaming the chain.
-4. **CI:** add the new version to the matrix in `.github/workflows/injection-compat.yml` if it's a
-   boundary worth watching, and let `latest` catch the next one.
+4. **CI:** nothing to add — `injection-compat` tracks `latest` on a daily cron, which is what
+   catches the *next* release. Use its `workflow_dispatch` input to run a specific version when you
+   want a boundary re-checked in CI rather than locally.
 
 ---
 
 ## 9. Land it
 
-- Update the matrix version list and `verifiedThrough` values.
+- Update the `verifiedThrough` values (the matrix is `latest`-only; there is no version list).
 - Update [docs/INTERNALS.md](INTERNALS.md) (the profile table) and the `version-compat-boundary`
   memory with the new drift + fix, so the next drift starts from the current truth.
 - Commit with a conventional prefix (`fix:` for a re-widened regex, `feat:` for a new profile) in
@@ -273,6 +279,13 @@ string on its own. Three of these were the release moving code around; one was a
 gaining a second code path. Branching all four would have meant three gates that each need a new
 variant on every future release, for nothing.
 
-**A widen still has to be re-verified DOWNWARD.** `windowFwd` can only grow the search space, so
-the first match cannot move — but a loosened regex can match a *different, shorter* span on an
-older bundle. Run the oldest version in each surviving profile's range, not just the new one.
+**A widen still has to be re-verified DOWNWARD, and only you can do it.** `windowFwd` can only grow
+the search space, so its first match cannot move — but a loosened regex can match a *different,
+shorter* span on an older bundle. Run the oldest version in each surviving profile's range, not just
+the new one.
+
+Profiles do not protect you here, and it is worth being precise about why: a profile scopes a gate
+*variant* to a version range, but a widen edits a gate that **all** profiles share. So a widen can
+break `legacy` while `latest` stays green — and since unattended CI checks `latest` only, that break
+ships. Most drift fixes are widens (three of the four on 2.1.239), which makes this the common case,
+not the exotic one.

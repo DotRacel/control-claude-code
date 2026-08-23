@@ -89,8 +89,14 @@ silent wrong-rebind. When a future release drifts a gate, add a variant in `anch
 `PROFILES` entry here.
 
 `node test/verify-injection.ts` runs the injector's own locators for the detected profile (no auth
-— idle `-p` host, read-only), and the `injection-compat` CI workflow runs it across a version
-matrix so "which versions are covered" stays answered as new releases ship.
+— idle `-p` host, read-only), and the `injection-compat` CI workflow runs it against **`latest`** on
+a daily cron — the early warning that the release which just shipped drifted a gate.
+
+Deliberately forward-looking, not a compatibility sweep: each older range keeps the gate set a
+profile already pinned for it, so the value is in seeing the *next* release break. The cost is that
+CI cannot catch a widened shared gate regressing an older profile — a widen edits one gate that all
+profiles use — so that check is manual, and step 8 of the runbook is where it lives. Use the
+workflow's `workflow_dispatch` input to run any single version on demand.
 
 When that CI goes red — a release drifted a gate — [INJECTION-DRIFT-RUNBOOK.md](INJECTION-DRIFT-RUNBOOK.md)
 is the step-by-step: read the error string, get the binary, find the new code shape, decide

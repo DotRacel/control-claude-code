@@ -15,12 +15,13 @@ on:
   # drifted a gate and needs a new profile. GitHub emails the repo owner on a failed scheduled run.
   schedule:
     - cron: '17 6 * * *' # daily 06:17 UTC (off the hour on purpose)
-  # Manual run. Leave the input blank to sweep the full version matrix; set it to one version
-  # (e.g. 2.1.235) to bisect exactly where a drift was introduced.
+  # Manual run — and the ONLY way to check a version other than `latest`. Set the input to one
+  # version to bisect where a drift was introduced, or to re-verify an older profile's range after
+  # widening a shared gate (see the note in the matrix job below).
   workflow_dispatch:
     inputs:
       claude_version:
-        description: 'Single claude version to test (blank = full matrix). e.g. 2.1.238'
+        description: 'Single claude version to test (blank = latest). e.g. 2.1.238'
         default: ''
         required: false
   # Also verify when the injection surface itself changes — an anchors.ts / profiles.ts edit that
@@ -42,12 +43,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Compute the version list: the manual single-version input if given, else the full matrix.
-  # The matrix spans every profile's range: legacy floor (2.1.229), a mid point (2.1.232), the
-  # spawner-fix point (2.1.234), the legacy ceiling (2.1.237), the preflight floor+ceiling
-  # (2.1.238 — a one-version profile), the async-token floor (2.1.239) and its verified ceiling
-  # (2.1.241), and whatever `latest` is today. All are real published tags (2.1.230 was never
-  # published). Both floors are pinned because that is where a too-wide `since` shows up.
+  # Compute the version list: the manual single-version input if given, else just `latest`.
+  #
+  # Unattended CI watches ONE version — whatever ships next. That is where a new drift appears, and
+  # a profile is how each older range keeps its own already-verified gate set, so re-testing those
+  # ranges on every cron run buys little.
+  #
+  # Know what this does NOT cover, because it is not hypothetical. Most drift fixes are WIDENS to a
+  # gate that ALL profiles share, not a new profile-scoped variant — three of the four 2.1.239 fixes
+  # were. `windowFwd` can only grow the search space so its first match cannot move, but a loosened
+  # REGEX can match a different, shorter span on an older bundle. That breaks `legacy` while `latest`
+  # stays green, and profiles cannot insulate against it because the widened gate is not per-profile.
+  # So after widening a shared gate, re-verify downward BY HAND — workflow_dispatch with the oldest
+  # version in each surviving profile's range, or locally per step 8 of INJECTION-DRIFT-RUNBOOK.md.
+  # Nothing here will catch it for you.
   matrix:
     runs-on: ubuntu-latest
     outputs:
@@ -58,7 +67,7 @@ jobs:
           if [ -n "${{ github.event.inputs.claude_version }}" ]; then
             echo 'versions=["${{ github.event.inputs.claude_version }}"]' >> "$GITHUB_OUTPUT"
           else
-            echo 'versions=["2.1.229","2.1.232","2.1.234","2.1.237","2.1.238","2.1.239","2.1.241","latest"]' >> "$GITHUB_OUTPUT"
+            echo 'versions=["latest"]' >> "$GITHUB_OUTPUT"
           fi
 
   verify:
