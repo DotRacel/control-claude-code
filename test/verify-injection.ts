@@ -86,17 +86,32 @@ async function main() {
   console.log(`[verify] version:    ${versionLabel}`);
   console.log(`[verify] profile:    ${profile.id} (${note})`);
 
-  // An idle stream-json host: it opens the inspector, waits on stdin, and never enters the
-  // remote-control/login path — so it needs no credential. debugger:false: we only read the
-  // bundle via Runtime.evaluate, we set no breakpoints.
+  /*
+   * An idle stream-json host: it opens the inspector, waits on stdin, and never enters the
+   * remote-control/login path — so it needs no credential. debugger:false: we only read the
+   * bundle via Runtime.evaluate, we set no breakpoints.
+   *
+   * `--verbose` is REQUIRED, not cosmetic: claude refuses `--print` with
+   * `--output-format=stream-json` unless it is present ("requires --verbose") and exits on the
+   * spot. BUN_INSPECT is honoured before that argument check, so the inspector still opens and
+   * attach still succeeds — the host is a corpse we can read for a few hundred ms, which is why
+   * this went unnoticed. Whether a run passed was then a race between claude's exit and our three
+   * evaluate round-trips: green on a fast box, red on a loaded CI runner, and always at whichever
+   * probe happened to be last. It costs nothing to keep the host alive — the flag adds no stderr
+   * output at all here, because a host that never serves a request has nothing to be verbose about.
+   */
+  let stderrTail = '';
   let h: AttachHandle;
   try {
     h = await launchAndAttach({
       claudeBin,
-      args: ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json'],
+      args: ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'],
       debugger: false,
       timeoutMs: 30000,
-      onStderr: (b) => process.env.CCC_VERBOSE && process.stderr.write(b),
+      onStderr: (b) => {
+        stderrTail = (stderrTail + b).slice(-2000); // kept so a dead host can quote its own reason
+        if (process.env.CCC_VERBOSE) process.stderr.write(b);
+      },
     });
   } catch (e: any) {
     console.error(`\n❌ FAIL: could not launch/attach ${claudeBin}: ${e?.message || e}`);
@@ -140,6 +155,22 @@ async function main() {
     };
     printTable('child worker gate (--sdk-url)', [childRow]);
     rows.push(childRow);
+  } catch (e: any) {
+    /*
+     * A dead host and a drifted gate need opposite fixes, so never let one wear the other's
+     * clothes. This branch used to surface as `[verify] fatal: inspector socket closed` from
+     * whichever probe ran last, which reads exactly like an injection failure even when every
+     * gate located fine — the whole point of quoting claude's own stderr here is that the next
+     * person does not have to reconstruct that.
+     */
+    if (h.isDead()) {
+      console.error(`\n❌ FAIL: the host claude exited before probing finished — NOT a gate drift.`);
+      console.error(`   claude said: ${stderrTail.trim().split('\n').pop() || '(nothing on stderr)'}`);
+      console.error(`   ${rows.filter((r) => r.ok).length} gate(s) had already located cleanly before it died.`);
+      console.error(`   Fix the host launch in this file, not the anchors.`);
+      process.exit(1);
+    }
+    throw e;
   } finally {
     h.kill();
   }

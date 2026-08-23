@@ -306,6 +306,19 @@ export class InspectorClient extends EventEmitter {
 
   /** JSON-RPC call: resolves with `result`. Always bounded by a deadline. */
   send(method: string, params: Record<string, any> = {}, { timeoutMs = this._rpcTimeoutMs }: { timeoutMs?: number } = {}): Promise<any> {
+    /*
+     * Reject up front on a closed socket, because _send() drops writes SILENTLY (it returns early
+     * rather than throwing, which is what close() itself needs when it writes its own close frame).
+     * The try/catch below therefore catches nothing, and the request would sit in _pending until
+     * the RPC deadline — and since that timer is unref'd, a caller with nothing else outstanding
+     * exits first and the promise never settles at all. Same message the close handler uses, so a
+     * request killed in flight and one sent too late read identically.
+     */
+    if (this._closed) {
+      const dead = Promise.reject(new Error('inspector socket closed'));
+      dead.catch(() => {}); // a fire-and-forget caller must not raise an unhandled rejection
+      return dead;
+    }
     const id = this._nextId++;
     const p = new Promise<any>((resolve, reject) => {
       let timer: NodeJS.Timeout | null = null;
