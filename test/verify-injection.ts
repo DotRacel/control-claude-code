@@ -37,6 +37,13 @@ import { resolveProfile } from '../src/injector/profiles.ts';
 const locate = (ic: AttachHandle['ic'], expr: string, key: string): Promise<any> =>
   runLocator(ic, expr, key, { timeoutMs: 12000, kickTimeoutMs: 25000 });
 
+/**
+ * Where a gate landed. Blank for the entry, since on a pre-split bundle that is every gate and the
+ * column would be noise; a chunk basename otherwise, which is the fact worth seeing since 2.1.243.
+ */
+const shortFile = (file: string | undefined, main: string | undefined): string =>
+  !file || file === main ? '' : (file.split('/').pop() ?? file) + ' ';
+
 interface Row {
   id: string;
   ok: boolean;
@@ -116,7 +123,7 @@ async function main() {
     const headlessRows = rowsFromGateResult(
       headless,
       profile.gates.map((g) => g.id),
-      (g) => `L${g.line}C${g.col} aliases=${JSON.stringify(g.aliases)}`,
+      (g) => `${shortFile(g.file, mainUrl)}L${g.line}C${g.col} aliases=${JSON.stringify(g.aliases)}`,
     );
     printTable('headless gates (remote-control)', headlessRows);
     rows.push(...headlessRows);
@@ -126,7 +133,7 @@ async function main() {
     const interactiveRows = rowsFromGateResult(
       interactive,
       profile.interactiveGates.map((g) => g.id),
-      (g) => `L${g.line}C${g.col} ${g.alias}() rebind=[${(g.names || []).join(',')}]`,
+      (g) => `${shortFile(g.file, mainUrl)}L${g.line}C${g.col} ${g.alias}() rebind=[${(g.names || []).join(',')}]`,
     );
     printTable('interactive gates (/rc)', interactiveRows);
     rows.push(...interactiveRows);
@@ -138,7 +145,7 @@ async function main() {
       id: 'child.sdkUrl',
       ok: childOk,
       detail: childOk
-        ? `dHs=${child.dHs} bp@L${child.bpLine}C${child.bpCol}`
+        ? `dHs=${child.dHs} bp@${shortFile(child.bpFile, mainUrl)}L${child.bpLine}C${child.bpCol}`
         : `could not locate (${JSON.stringify(child)?.slice(0, 160)})`,
     };
     printTable('child worker gate (--sdk-url)', [childRow]);

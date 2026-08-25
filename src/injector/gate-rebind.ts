@@ -98,13 +98,15 @@ async function attachChildAndRebind(childPort: number, childWsUrl: string, log: 
 
   const CKEY = '__ccChildGate';
   const loc = await runLocator(cic, buildChildLocatorExpr(CKEY), CKEY);
-  if (!loc || typeof loc !== 'object' || !loc.main || !loc.dHs || loc.bpLine == null) {
+  // dHs is now optional: on a chunked build the allowlist function is in a different chunk from
+  // the reject site, so its name is not in scope there and the result local is what carries the fix.
+  if (!loc || typeof loc !== 'object' || !loc.main || !loc.resultLocal || loc.bpLine == null) {
     log('[child] gate locate failed: ' + JSON.stringify(loc) + ' — releasing anyway');
     await cic.send('Inspector.initialized').catch(() => {});
     return;
   }
-  log(`[child] dHs=${loc.dHs} bp@L${loc.bpLine}C${loc.bpCol}`);
-  await cic.send('Debugger.setBreakpointByUrl', { url: loc.main, lineNumber: loc.bpLine, columnNumber: loc.bpCol });
+  log(`[child] guard=${loc.resultLocal} dHs=${loc.dHs ?? '(out of scope)'} bp@${loc.bpFile || loc.main}:L${loc.bpLine}C${loc.bpCol}`);
+  await cic.send('Debugger.setBreakpointByUrl', { url: loc.bpFile || loc.main, lineNumber: loc.bpLine, columnNumber: loc.bpCol });
 
   let childHit = false;
   cic.on('Debugger.paused', async (p: any) => {
@@ -112,9 +114,9 @@ async function attachChildAndRebind(childPort: number, childWsUrl: string, log: 
       if (!childHit) {
         childHit = true;
         const fid = p.callFrames[0].callFrameId;
-        const expr = childDhsRebind(loc.dHs) + '; "ok"';
+        const expr = childDhsRebind(loc.dHs, loc.resultLocal) + '; "ok"';
         const r = await cic.send('Debugger.evaluateOnCallFrame', { callFrameId: fid, expression: expr, returnByValue: true }).then(rval).catch((e) => 'ERR:' + e.message);
-        log(`[child] HIT rebind dHs → ${r}`);
+        log(`[child] HIT rebind ${loc.resultLocal}→null → ${typeof r === 'string' ? r : JSON.stringify(r)}`);
       }
     } finally {
       await cic.send('Debugger.resume', {}).catch(() => {});
@@ -210,7 +212,10 @@ export async function launchWithGatesRebound(opts: GateRebindOpts): Promise<Gate
     for (const g of located.gates as any[]) {
       const rep: GateReport = { id: g.id, located: !g.error, error: g.error, line: g.line, col: g.col, aliases: g.aliases };
       if (!g.error) {
-        const sb = await ic.send('Debugger.setBreakpointByUrl', { url: MAIN, lineNumber: g.line, columnNumber: g.col }).catch((e) => ({ __e: e.message }));
+        // Per-gate URL: since 2.1.243 the app is split into chunks and gates land in
+        // different ones. Pre-split bundles report MAIN for every gate, so this is the same
+        // call it always was there.
+        const sb = await ic.send('Debugger.setBreakpointByUrl', { url: g.file || MAIN, lineNumber: g.line, columnNumber: g.col }).catch((e) => ({ __e: e.message }));
         if (sb && sb.breakpointId) {
           rep.breakpointId = sb.breakpointId;
           byBp.set(sb.breakpointId, rep);
@@ -414,7 +419,10 @@ export async function launchInteractiveWithGatesRebound(opts: InteractiveLaunchO
       const rep: GateReport = { id: g.id, located: !g.error, error: g.error, line: g.line, col: g.col, aliases: g.names ? { fn: g.alias, rebind: g.names.join(',') } : undefined };
       if (!g.error) {
         namesById.set(g.id, g.names);
-        const sb = await ic.send('Debugger.setBreakpointByUrl', { url: MAIN, lineNumber: g.line, columnNumber: g.col }).catch((e) => ({ __e: e.message }));
+        // Per-gate URL: since 2.1.243 the app is split into chunks and gates land in
+        // different ones. Pre-split bundles report MAIN for every gate, so this is the same
+        // call it always was there.
+        const sb = await ic.send('Debugger.setBreakpointByUrl', { url: g.file || MAIN, lineNumber: g.line, columnNumber: g.col }).catch((e) => ({ __e: e.message }));
         if (sb && sb.breakpointId) rep.breakpointId = sb.breakpointId;
         else { rep.located = false; rep.error = 'setBreakpoint-failed'; }
       }
@@ -445,12 +453,18 @@ export async function launchInteractiveWithGatesRebound(opts: InteractiveLaunchO
           const fillVars = { ...vars };
           for (let i = 0; i < names.length; i++) fillVars[String(i)] = names[i];
           let ok = true;
+          // Name the assignment that failed, not just the gate. Since the 2.1.243 chunk split a
+          // rebind target can be an IMPORTED binding, which ES modules make read-only — the
+          // assignment throws instead of quietly doing nothing, and "PARTIAL" alone gives the next
+          // reader no way to tell that apart from a regex that matched the wrong thing.
+          const failed: string[] = [];
           for (let i = 0; i < names.length; i++) {
             const expr = `${names[i]}=${fill(spec.rebindValues[i], fillVars)}; "ok"`;
             const r = await ic.send('Debugger.evaluateOnCallFrame', { callFrameId: frameId, expression: expr, returnByValue: true }).then(rval).catch((e) => 'ERR:' + e.message);
-            if (r !== 'ok') ok = false;
+            if (r !== 'ok') { ok = false; failed.push(`${names[i]}: ${(typeof r === 'string' ? r : JSON.stringify(r)).slice(0, 160)}`); }
           }
           rep.reboundOk = ok;
+          if (failed.length) log(`[int] ${rep.id} could not rebind — ${failed.join(' | ')}`);
           log(`[int] HIT ${rep.id} rebind [${names.join(',')}] ${ok ? 'ok' : 'PARTIAL/FAIL'}${spec.sticky ? ' (sticky)' : ''}`);
           // Hot-path gates (baseurl/token/enabled) are rebound once. Connect-time
           // gates patch per-invocation locals and must fire on every `/rc`.

@@ -326,8 +326,12 @@ async function runInteractive(o: RunCtx) {
     log: logger.log,
     onStderr: (s) => { logger.appendClaude(s); stderrTail = (stderrTail + s).slice(-4000); },
   });
+  // "located" is not "rebound", and since the 2.1.243 chunk split the two really can differ: a
+  // rebind target that is an imported binding is read-only, so the assignment throws long after the
+  // locator was perfectly happy. This line is printed at launch, before any gate has been HIT, so
+  // it can only report locate — say so, rather than claiming a rebind nobody has attempted yet.
   const okN = h.reports.filter((r) => r.located).length;
-  logger.log(`[cli] ready — ${okN}/${h.reports.length} gates rebound (claude ${h.version ?? '?'} / profile ${h.profileId})`);
+  logger.log(`[cli] ready — ${okN}/${h.reports.length} gates located (claude ${h.version ?? '?'} / profile ${h.profileId})`);
 
   let code: number | null = null;
   h.child.on('exit', (c) => { code = c; });

@@ -204,26 +204,28 @@ export const GATE_BRIDGEMAIN_HTTPSCHEME: GateSpec = {
 // then attach + rebind the child too (it has its own --sdk-url allowlist gate).
 export const GATE_SPAWNER_SPAWN: GateSpec = {
   id: 'spawner.spawn',
-  windowAnchor: '--replay-user-messages',
-  windowBack: 0,
-  windowFwd: 3600,
-  // `{...,env:l,windowsHide:!0}` is the spawn options object. Match only up to the env
-  // alias (`env:l,`) — as of 2.1.234 `windowsHide` sits at ~1204 bytes past the anchor,
-  // so anchoring on it was fragile at the window edge (windowFwd used to be 1200 and cut
-  // it off, breaking the whole headless child-rebind chain). `[,}]` after the alias is
-  // enough to disambiguate the spawn env from `e.env` (which has no colon) and from the
-  // long env-object literal above (whose keys are CLAUDE_CODE_*, never `env`).
+  // ── This gate's anchor was the wrong one for three releases running ──
+  // It used to be `--replay-user-messages`, an ARGUMENT-VALIDATION string that merely happened to
+  // sit upstream of the spawn options in a single-file bundle. Everything between the two was free
+  // to grow, and did: the match slid to +1187 on 2.1.234 (windowFwd was 1200), to +2007 on 2.1.239
+  // (windowFwd had been widened to 1600), and on 2.1.243 the chunk split moved the validation
+  // strings into a different FILE from the spawn site, where no window size could ever have reached
+  // it. Three failures, one cause — the anchor was never near the thing it was anchoring.
   //
-  // The SAME window-edge failure recurred on 2.1.239: the arg/env construction above grew and
-  // pushed `env:m` out to ~2007 bytes past the anchor, past the 1600 this had been widened to,
-  // and the gate went back to alias-not-found (empty partial — nothing matched at all).
-  // windowFwd is now 3600, which keeps the match at ~56% of the window. Measured on 2.1.241:
-  // `env:X[,}]` has exactly ONE hit anywhere in the first 5000 bytes after the anchor, so the
-  // extra room buys headroom without buying ambiguity.
+  // `[bridge:session] Child args:` is the debug log emitted AT the spawn, one statement before it.
+  // Measured on 2.1.229 / .238 / .239 / .241 / .243: `Spawning sessionId` is 115 bytes back and
+  // `env:<alias>` is 159-322 forward, on EVERY one of them. The window below is ~4x that spread,
+  // so the recurring window-edge failure mode is gone rather than deferred.
+  windowAnchor: '[bridge:session] Child args:',
+  windowBack: 400,
+  windowFwd: 800,
+  // `{...,env:l,windowsHide:!0}` is the spawn options object. Match only up to the env alias:
+  // `[,}]` after it is enough to tell the spawn env from `e.env` (no colon) and from the big env
+  // literal above, whose keys are all CLAUDE_CODE_*, never `env`.
   aliases: { L: 'env:([\\w$]+)[,}]' },
-  // Break BEFORE the spawn call (the `.spawn(` site fires AFTER the child is already
-  // spawned). The env object `l` is defined just before this debug log, so pausing here
-  // lets us mutate l.BUN_INSPECT before the spawn reads it.
+  // Break BEFORE the spawn call (the `.spawn(` site fires AFTER the child already exists). The env
+  // object is built just before this log, so pausing here lets us set env.BUN_INSPECT while the
+  // spawn has yet to read it.
   bpSubstr: 'Spawning sessionId',
   rebinds: [], // handled specially (needs the child inspector port at runtime)
 };
@@ -258,31 +260,104 @@ export function headlessGates(variants: GateVariants): GateSpec[] {
 /**
  * Shared preamble for every locator expression, injected into the target.
  *
- * Assumes the enclosing scope has already bound `s` to the bundle text. Both helpers exist because
- * the naive forms are O(bundle) EACH TIME and the bundle is ~28MB / 60k lines (2.1.241):
+ * ── Why this is a source REGISTRY and not one string ──
+ * Through 2.1.241 the whole app was a single script at `Bun.main`, so every locator read that one
+ * file and every breakpoint addressed that one URL. 2.1.243 split it: `Bun.main` is now a 20KB
+ * entry that `import`s ~1380 content-hashed chunks out of `/$bunfs/root/`, and our gates land in
+ * seven different ones. A breakpoint has to name the chunk it is in — JSC binds
+ * `setBreakpointByUrl` against a chunk URL happily (verified: it returns a real scriptId, and the
+ * chunks are `// @bun @bytecode` yet still carry source positions), but it cannot find a line that
+ * is in another file.
  *
- *  - findAnchor memoises `s.indexOf(needle)`. The 7 headless gates share only 4 distinct window
- *    anchors — `cli_bridge_path` alone is the anchor for 3 of them, and it sits near the END of the
- *    bundle, so each repeat was a full ~9ms scan for a result we already had.
- *  - absLineCol builds ONE newline-offset table (~5ms) and binary-searches it, replacing a
+ * So an anchor resolves to a SOURCE, not just an index, and each gate reports the file it landed
+ * in. `Bun.main` is always searched first and the directory is only listed when something is not
+ * there, which is what keeps the pre-split versions at exactly their old cost: one read, no
+ * readdir, no stat. A source is cached only once it has produced a hit — several gates share the
+ * 7.3MB chunk, and re-reading that per gate would cost more than the split itself.
+ *
+ * The two memoisations are older than the split and still earn their place, because the naive
+ * forms are O(source) EACH TIME:
+ *
+ *  - findAnchor memoises the search. The 7 headless gates share only 4 distinct window anchors —
+ *    `cli_bridge_path` alone is the anchor for 3 of them, and it sits near the END of the entry, so
+ *    each repeat was a full scan for a result we already had.
+ *  - absLineCol builds ONE newline-offset table per source and binary-searches it, replacing a
  *    `s.slice(0, idx).split("\n")` per gate — that slice copies up to 28MB and the split allocates
  *    a 60k-element array, ~30ms across 7 gates, to count newlines we can count once.
  *
- * The table is built lazily so a locator that never asks for a line/col never pays for it.
- * Semantics are unchanged: `line` is the 0-based count of newlines before idx, and `col` is the
- * offset from the last newline (or from 0 on the first line).
+ * Both are lazy, so a locator that never asks never pays. Semantics are unchanged: `line` is the
+ * 0-based count of newlines before idx, and `col` is the offset from the last newline (or from 0
+ * on the first line).
  */
 const LOCATOR_PRELUDE = `
-        var __nl = null;
-        function lineTable(){ if (__nl) return __nl; __nl = []; for (var j = s.indexOf("\\n"); j >= 0; j = s.indexOf("\\n", j + 1)) __nl.push(j); return __nl; }
-        function absLineCol(idx){
-          var t = lineTable(), lo = 0, hi = t.length;
+        var __ROOT = "/$bunfs/root/";
+        var __text = {}, __names = null, __nl = {};
+
+        // Bun.main is read the way it always has been, and eagerly: that call is the one thing
+        // proven on every version back to 2.1.229, and on a pre-split bundle it is also the only
+        // read that ever happens. Everything below is reached only when an anchor is NOT in here.
+        __text[MAIN] = await Bun.file(MAIN).text();
+
+        // fs is for the chunks, and is deliberately optional. If a build ever refuses the import,
+        // sourceNames() degrades to [MAIN] and every locator behaves exactly as it did before the
+        // split — a miss becomes "anchor-not-found", never a locator that throws.
+        var __fs = null;
+        try { __fs = await import("node:fs"); } catch (e) {}
+
+        function sourceText(url){
+          if (!(url in __text)) __text[url] = peek(url);
+          return __text[url];
+        }
+        /** Read without caching: the sweep touches ~1380 files and most match nothing. */
+        function peek(url){
+          if (url in __text) return __text[url];
+          if (!__fs) return "";
+          try { return __fs.readFileSync(url, "utf8"); } catch (e) { return ""; }
+        }
+        /** Bun.main first, then every other .js in the embedded root — listed only if we must. */
+        function sourceNames(){
+          if (__names) return __names;
+          __names = [MAIN];
+          if (!__fs) return __names;
+          try {
+            var dir = __fs.readdirSync(__ROOT);
+            for (var i = 0; i < dir.length; i++) {
+              var u = __ROOT + dir[i];
+              if (u !== MAIN && /\\.js$/.test(dir[i])) __names.push(u);
+            }
+          } catch (e) {}
+          return __names;
+        }
+
+        function lineTable(url){
+          if (__nl[url]) return __nl[url];
+          var t = [], s = sourceText(url);
+          for (var j = s.indexOf("\\n"); j >= 0; j = s.indexOf("\\n", j + 1)) t.push(j);
+          __nl[url] = t; return t;
+        }
+        function absLineCol(url, idx){
+          var t = lineTable(url), lo = 0, hi = t.length;
           while (lo < hi) { var mid = (lo + hi) >> 1; if (t[mid] < idx) lo = mid + 1; else hi = mid; }
           return { line: lo, col: lo === 0 ? idx : idx - (t[lo - 1] + 1) };
         }
+        function totalLines(url){ return lineTable(url).length + 1; }
+
+        /**
+         * First source containing \`needle\`, as {url, s, idx}, or null. Caches the source that hit
+         * so the next anchor in the same chunk is free.
+         */
         var __find = new Map();
-        function findAnchor(needle){ if (!__find.has(needle)) __find.set(needle, s.indexOf(needle)); return __find.get(needle); }
-        function totalLines(){ return lineTable().length + 1; }
+        function findSource(needle){
+          if (__find.has(needle)) return __find.get(needle);
+          var names = sourceNames(), hit = null;
+          for (var i = 0; i < names.length; i++) {
+            var t = peek(names[i]);
+            var k = t.indexOf(needle);
+            if (k >= 0) { __text[names[i]] = t; hit = { url: names[i], s: t, idx: k }; break; }
+          }
+          __find.set(needle, hit);
+          return hit;
+        }
 `;
 
 /**
@@ -305,24 +380,39 @@ export function buildChildLocatorExpr(globalKey: string): string {
     (async () => {
       try {
         var MAIN = Bun.main;
-        var s = await Bun.file(MAIN).text();
         ${LOCATOR_PRELUDE}
-        var out = { main: MAIN, total_lines: totalLines() };
+        var out = { main: MAIN };
         // dHs name: locate uHs("--sdk-url"), walk back to the enclosing function name.
-        var si = findAnchor('("--sdk-url")');
-        out.sdkUrlIdx = si;
+        var sd = findSource('("--sdk-url")');
+        out.sdkUrlIdx = sd ? sd.idx : -1;
         // NB: minified names can contain '$' (e.g. dHs = "l$s"), so match [\\w$]+ not \\w+.
-        if (si >= 0) {
-          var b1 = s.slice(si - 200, si);
+        if (sd) {
+          out.file = sd.url;
+          out.total_lines = totalLines(sd.url);
+          var b1 = sd.s.slice(sd.idx - 200, sd.idx);
           var mm = /function ([\\w$]+)\\(\\)\\{[^{}]*$/.exec(b1);
           out.dHs = mm ? mm[1] : null;
-        } else out.dHs = null;
-        // breakpoint: the \`let nn=cku(J);if(nn!==null)\` right before the reject telemetry.
-        var ci = findAnchor("tengu_sdk_url_host_rejected");
-        if (ci >= 0) {
-          var back = s.slice(ci - 240, ci);
-          var m2 = /let [\\w$]+=[\\w$]+\\([^)]*\\);if\\([\\w$]+!==null\\)/.exec(back);
-          if (m2) { var abs = ci - 240 + back.indexOf(m2[0]); var p = absLineCol(abs); out.bpLine = p.line; out.bpCol = p.col; }
+        } else { out.dHs = null; out.total_lines = totalLines(MAIN); }
+        // The reject site: \`let n=sd(Se);if(n!==null)\` right before the reject telemetry.
+        //
+        // The breakpoint goes on the \`if\`, not on the \`let\`, and what gets rebound is the RESULT
+        // LOCAL rather than the allowlist function. That is the difference between working and not
+        // on a chunked build: 2.1.243 put \`("--sdk-url")\` and this reject 59KB apart in two
+        // DIFFERENT chunks, so the function name walked back from the former is not even in scope
+        // here (\`ReferenceError: d is not defined\`), and the local this module calls it by is an
+        // imported binding, which ES modules make read-only. \`n\` is a plain \`let\` — always
+        // writable, in scope by definition, and it is what the guard actually reads. On a
+        // pre-split bundle this is the same site and the same assignment, so nothing changes there.
+        var cj = findSource("tengu_sdk_url_host_rejected");
+        if (cj) {
+          var back = cj.s.slice(cj.idx - 240, cj.idx);
+          var m2 = /let ([\\w$]+)=[\\w$]+\\([^)]*\\);(if\\(\\1!==null\\))/.exec(back);
+          if (m2) {
+            // Offset to the \`if\`: at the \`let\` the result is still in TDZ.
+            var abs = cj.idx - 240 + back.indexOf(m2[0]) + m2[0].indexOf(m2[2]);
+            var p = absLineCol(cj.url, abs);
+            out.bpFile = cj.url; out.bpLine = p.line; out.bpCol = p.col; out.resultLocal = m2[1];
+          }
         }
         globalThis[${K}] = out;
       } catch (e) { globalThis[${K}] = "ERR:" + (e && e.message || e); }
@@ -330,9 +420,20 @@ export function buildChildLocatorExpr(globalKey: string): string {
     "kicked";`;
 }
 
-/** Rebind expression for the child's dHs (getSdkUrl allowlist check). */
-export function childDhsRebind(dHsName: string): string {
-  return `${dHsName}=function(){var a=(typeof process!=="undefined"&&process.argv)||[];var u;for(var i=0;i<a.length;i++){if(a[i]==="--sdk-url"){u=a[i+1];break;}}return{status:"ok",url:u}}`;
+/**
+ * Neutralize the child's `--sdk-url` allowlist at the reject site.
+ *
+ * `resultLocal` is the `let` the guard reads (`let n=sd(url);if(n!==null)`) — setting it to null is
+ * what makes the check pass, and it is the only part that works on every bundle shape. `dHsName` is
+ * the allowlist function itself, rebound as well when it is in scope so the RUNTIME getSdkUrl
+ * consumer is covered too; on a chunked build it usually is not, so that half is best-effort and
+ * wrapped rather than allowed to fail the whole expression.
+ */
+export function childDhsRebind(dHsName: string | null, resultLocal: string): string {
+  const fn = dHsName
+    ? `try{${dHsName}=function(){var a=(typeof process!=="undefined"&&process.argv)||[];var u;for(var i=0;i<a.length;i++){if(a[i]==="--sdk-url"){u=a[i+1];break;}}return{status:"ok",url:u}}}catch(e){}`
+    : '';
+  return `${resultLocal}=null;${fn}`;
 }
 
 /** Substitute ${name} placeholders from a map (aliases + TOKEN/URL). */
@@ -356,15 +457,15 @@ export function buildLocatorExpr(globalKey: string, gates: GateSpec[] = GATES): 
     (async () => {
       try {
         var MAIN = Bun.main;
-        var s = await Bun.file(MAIN).text();
         var GATES = ${GATES_JSON};
         ${LOCATOR_PRELUDE}
         function fillLocal(t, vars){ return t.replace(/\\$\\{(\\w+)\\}/g, function(_, k){ return (k in vars) ? vars[k] : ("\\${"+k+"}"); }); }
         var out = [];
         for (var gi = 0; gi < GATES.length; gi++) {
           var G = GATES[gi];
-          var anchorIdx = findAnchor(G.windowAnchor);
-          if (anchorIdx < 0) { out.push({ id: G.id, error: "anchor-not-found" }); continue; }
+          var at = findSource(G.windowAnchor);
+          if (!at) { out.push({ id: G.id, error: "anchor-not-found" }); continue; }
+          var s = at.s, anchorIdx = at.idx;
           var start = Math.max(0, anchorIdx - G.windowBack);
           var win = s.slice(start, anchorIdx + G.windowFwd);
           var aliases = {}, ok = true;
@@ -373,13 +474,13 @@ export function buildLocatorExpr(globalKey: string, gates: GateSpec[] = GATES): 
             if (!m) { ok = false; break; }
             aliases[name] = m[1];
           }
-          if (!ok) { out.push({ id: G.id, error: "alias-not-found", partial: aliases }); continue; }
+          if (!ok) { out.push({ id: G.id, error: "alias-not-found", partial: aliases, file: at.url }); continue; }
           var sub = fillLocal(G.bpSubstr, aliases);
           var rel = win.indexOf(sub);
-          if (rel < 0) { out.push({ id: G.id, error: "bp-substr-not-found", aliases: aliases, sub: sub }); continue; }
+          if (rel < 0) { out.push({ id: G.id, error: "bp-substr-not-found", aliases: aliases, sub: sub, file: at.url }); continue; }
           var absIdx = start + rel;
-          var lc = absLineCol(absIdx);
-          out.push({ id: G.id, line: lc.line, col: lc.col, aliases: aliases });
+          var lc = absLineCol(at.url, absIdx);
+          out.push({ id: G.id, file: at.url, line: lc.line, col: lc.col, aliases: aliases });
         }
         globalThis[${K}] = { main: MAIN, gates: out };
       } catch (e) { globalThis[${K}] = "ERR:" + (e && e.message || e); }
@@ -437,6 +538,33 @@ export const INTERACTIVE_GATES: InteractiveGateSpec[] = [
     // longer insists the check is a bare call — and `\([^)]*\)` lets either call take an argument.
     // The async getter needs no rebind of its own: getBridgeAccessTokenAsync reads the same
     // `wge()` override as the sync one (verified in the 2.1.241 bundle), which int.token owns.
+    //
+    // ── On 2.1.243 these three rebinds FAIL, and that is currently harmless ──
+    // The chunk split made them `import`ed bindings, and an ES module import is read-only:
+    // `no = …` raises "TypeError: Attempted to assign to readonly property". The gate still
+    // locates and still hits; only the assignments are refused. `/rc` works anyway — verified end
+    // to end — and not by luck. Each of the three is separately moot:
+    //
+    //   no = getBridgeDisabledReason. Its first line is `if(El())return null`, and `El` is the
+    //     same module-local flag (`function El(){return!1}`) that int.enabled rebinds to true, in
+    //     the same chunk, successfully. So the whole chain below it is skipped — including
+    //     `if(!Sl())return "Remote Control requires a claude.ai subscription…"`, which is the one
+    //     that exists to stop us.
+    //   ao = checkBridgeMinVersion. It asks OUR server for a min_version and reports the version
+    //     as too old if there is one. We do not send one, so it returns null — and if that ever
+    //     changes it is our own backend doing it.
+    //   ro = the trusted-device requirement, which is an ORG policy ("Your organization requires
+    //     Trusted Devices for Remote Control"). BYOK has no org, which is also why int.orguuid
+    //     exists.
+    //
+    // So this is documented rather than fixed. Two things make that a decision and not neglect:
+    // the failure is LOUD (gate-rebind names the binding and the TypeError), and if an assumption
+    // above stops holding the symptom is claude refusing `/rc` with its own error message, not
+    // something silent. The dependency to watch is the first one: int.enabled's `El` rebind covers
+    // getBridgeDisabledReason only because both functions short-circuit on that same flag, which
+    // is a property of today's code shape, not a promise. If a release stops doing that, this gate
+    // needs the real fix — rebind the LOCALS that receive the results (`let h=await no();if(h)`),
+    // which are ordinary `let` bindings and always writable, as one gate per check.
     rebindRe: 'let [\\w$]+=await ([\\w$]+)\\(\\);if\\([\\w$]+\\)return\\{kind[^]*?let [\\w$]+=await ([\\w$]+)\\(\\);if\\([\\w$]+\\)return\\{kind[^]*?if\\(![^;]*?\\)return\\{kind[^]*?await [\\w$]+\\([^)]*\\),await ([\\w$]+)\\([^)]*\\)',
     rebindValues: ['async function(){return null}', 'async function(){return null}', 'async function(){return !1}'],
     sticky: true,
@@ -552,28 +680,78 @@ export function buildInteractiveLocatorExpr(globalKey: string, gates: Interactiv
     (async () => {
       try {
         var MAIN = Bun.main;
-        var s = await Bun.file(MAIN).text();
         var GATES = ${GATES_JSON};
         ${LOCATOR_PRELUDE}
-        function expName(n){ var m = new RegExp(n + ":\\\\(\\\\)=>([\\\\w$]+)").exec(s); return m ? m[1] : null; }
+        /**
+         * Resolve an export NAME to the source that actually defines it, and to the local binding
+         * it is defined under: {url, s, alias}, or null.
+         *
+         * The export table has had two shapes. esbuild's single-bundle form is an object literal,
+         * \`getBridgeBaseUrl:()=>aer\`, and the definition is in the same (only) file. Once 2.1.243
+         * split the app into real ES modules it became \`export{U as jZb}\` — and the name we ask for
+         * is usually re-exported through a barrel or two before reaching the module that declares
+         * it, so resolution alternates two steps until a \`function <local>(\` appears:
+         *
+         *   export alias  \`{U as jZb}\`                    → same file, follow to local U
+         *   import edge   \`import{jZb as e}from"chunk-B"\`  → file B, follow to name jZb
+         *
+         * What it must NEVER do is look for \`function <alias>(\` across files. Minified locals are
+         * one or two characters, so a blind search finds *something* in almost every chunk: for
+         * getBridgeBaseUrl on 2.1.243 it finds \`function e(t){return d.test(t)?Date.parse(t):NaN}\`,
+         * a date parser, and rebinding that would be a silent, invisible wrong answer. Failing with
+         * export-unresolved is the only acceptable outcome when the chain runs out.
+         */
+        function expSource(n){
+          return findSource(n + ":()=>") || findSource(" as " + n + ",") || findSource(" as " + n + "}");
+        }
+        /** The local binding a file exports under \`n\`, in either shape. */
+        function localFor(s, n){
+          var m = new RegExp(n + ":\\\\(\\\\)=>([\\\\w$]+)").exec(s);
+          if (m) return m[1];
+          m = new RegExp("[{,]([\\\\w$]+) as " + n + "[,}]").exec(s);
+          return m ? m[1] : null;
+        }
+        function resolveExport(n){
+          var at = expSource(n);
+          if (!at) return null;
+          var url = at.url, s = at.s, name = n;
+          // Each turn of the loop asks one file for one EXPORT name. If the local it exports is
+          // declared there we are done; otherwise that local came in through an import, and the
+          // import clause tells us both the next file and the next export name to ask it for.
+          // 12 bounds a re-export cycle; the deepest real chain measured on 2.1.243 is two files.
+          for (var hop = 0; hop < 12; hop++) {
+            var local = localFor(s, name);
+            if (!local) return null;
+            var di = s.indexOf("function " + local + "(");
+            if (di >= 0) return { url: url, s: s, alias: local, defIdx: di };
+            var im = new RegExp("import\\\\{[^}]*[{,]([\\\\w$]+) as " + local + "[,}][^}]*\\\\}from\\"([^\\"]+)\\"").exec(s);
+            if (im) { url = im[2]; s = sourceText(url); name = im[1]; continue; }
+            // An import that does not rename: the next file exports it under the same name.
+            var im2 = new RegExp("import\\\\{[^}]*[{,]" + local + "[,}][^}]*\\\\}from\\"([^\\"]+)\\"").exec(s);
+            if (im2) { url = im2[1]; s = sourceText(url); name = local; continue; }
+            return null;
+          }
+          return null;
+        }
         var out = [];
         for (var gi = 0; gi < GATES.length; gi++) {
-          var G = GATES[gi], di = -1, alias = null;
+          var G = GATES[gi], di = -1, alias = null, at = null, s = null, ai = -1;
           if (G.locate.exportName) {
-            alias = expName(G.locate.exportName);
-            if (!alias) { out.push({ id: G.id, error: "export-not-found" }); continue; }
-            di = s.indexOf("function " + alias + "(");
+            var rx = resolveExport(G.locate.exportName);
+            if (!rx) { out.push({ id: G.id, error: "export-unresolved" }); continue; }
+            at = rx; s = rx.s; alias = rx.alias; di = rx.defIdx;
           } else {
-            var ai = findAnchor(G.locate.anchorStr);
-            if (ai < 0) { out.push({ id: G.id, error: "anchor-not-found" }); continue; }
+            at = findSource(G.locate.anchorStr);
+            if (!at) { out.push({ id: G.id, error: "anchor-not-found" }); continue; }
+            s = at.s; ai = at.idx;
             di = s.lastIndexOf(G.locate.declKeyword, ai);
             var dm = /([\\w$]+)\\(/.exec(s.slice(di + G.locate.declKeyword.length, di + G.locate.declKeyword.length + 40));
             alias = dm ? dm[1] : null;
           }
-          if (di < 0) { out.push({ id: G.id, error: "def-not-found", alias: alias }); continue; }
+          if (di < 0) { out.push({ id: G.id, error: "def-not-found", alias: alias, file: at && at.url }); continue; }
           var body = G.locate.exportName ? s.slice(di, di + 900) : s.slice(di, ai + G.locate.anchorStr.length + 120);
           var rm = new RegExp(G.rebindRe).exec(body);
-          if (!rm) { out.push({ id: G.id, error: "rebind-re-not-found", alias: alias, body: body.slice(0, 160) }); continue; }
+          if (!rm) { out.push({ id: G.id, error: "rebind-re-not-found", alias: alias, file: at.url, body: body.slice(0, 160) }); continue; }
           var names = rm.slice(1);
           var bpIdx;
           if (G.bpAnchor) {
@@ -583,8 +761,8 @@ export function buildInteractiveLocatorExpr(globalKey: string, gates: Interactiv
           } else {
             bpIdx = s.indexOf("){", di) + 2;
           }
-          var lc = absLineCol(bpIdx);
-          out.push({ id: G.id, alias: alias, names: names, line: lc.line, col: lc.col });
+          var lc = absLineCol(at.url, bpIdx);
+          out.push({ id: G.id, file: at.url, alias: alias, names: names, line: lc.line, col: lc.col });
         }
         globalThis[${K}] = { main: MAIN, gates: out };
       } catch (e) { globalThis[${K}] = "ERR:" + (e && e.message || e); }

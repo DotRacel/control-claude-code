@@ -4,9 +4,9 @@
  *
  * `remote-control` is MULTI-PROCESS: bridgeMain registers the environment, then spawns a worker
  * `claude --print --sdk-url <our server>` to actually run the session. That worker has its OWN gate
- * — `dHs()` rejects a non-Anthropic `--sdk-url` host — so the injector has to inject `BUN_INSPECT`
- * into the child's spawn env at the `spawner.spawn` gate, attach to the child, and rebind `dHs`
- * there too. Nothing joins the data-plane if any link in that chain fails.
+ * — a `--sdk-url` allowlist rejects a non-Anthropic host — so the injector has to inject
+ * `BUN_INSPECT` into the child's spawn env at the `spawner.spawn` gate, attach to the child, and
+ * neutralize that guard there too. Nothing joins the data-plane if any link in that chain fails.
  *
  * test-gates.ts cannot cover it: its stub answers `/work/poll` with no work, so bridgeMain never
  * has a session to run and never spawns anything. `spawner.spawn` reports `hit=false` there
@@ -23,7 +23,7 @@
  *   2. the server handed out work          ⇒ bridgeMain is polling us, not Anthropic
  *   3. spawner.spawn hit + rebound         ⇒ we reached the spawn site and wrote the child's env
  *   4. the child opened its inspector      ⇒ the injected BUN_INSPECT actually took
- *   5. the child's dHs rebound             ⇒ its --sdk-url allowlist was neutralized
+ *   5. the child's guard rebound           ⇒ its --sdk-url allowlist was neutralized
  *   6. the server saw ws.connect           ⇒ the child ACCEPTED our sdk-url and joined the data-plane
  *
  * Step 6 is the one that cannot be faked by a locator: a rebind that located perfectly but returned
@@ -56,6 +56,7 @@ async function main() {
   const log: string[] = [];
   const seen = (t: ServerEvent['type']) => events.some((e) => e.type === t);
   const said = (s: string) => log.some((l) => l.includes(s));
+  const logText = () => log.join('\n');
 
   let h: GateRebindHandle;
   let stderrTail = '';
@@ -82,7 +83,10 @@ async function main() {
     { n: 2, what: 'server handed out session work', done: () => events.some((e) => e.type === 'work.poll' && (e as any).delivered) },
     { n: 3, what: 'spawner.spawn hit + child env rebound', done: () => !!(spawner()?.hit && spawner()?.reboundOk) },
     { n: 4, what: 'child opened its inspector (BUN_INSPECT took)', done: () => said('[child] connected') },
-    { n: 5, what: "child's dHs (--sdk-url allowlist) rebound", done: () => said('[child] HIT rebind dHs → ok') },
+    // Matched on the outcome, not the binding's name: since the 2.1.243 chunk split what gets
+    // rebound is the guard's own result local (`let n=sd(url);if(n!==null)`), because the allowlist
+    // function itself lives in another chunk and is not in scope at the reject site.
+    { n: 5, what: "child's --sdk-url guard rebound", done: () => /\[child\] HIT rebind \S+ → ok/.test(logText()) },
     { n: 6, what: 'child joined the data-plane (ws.connect)', done: () => seen('ws.connect') },
   ];
 
@@ -119,8 +123,8 @@ async function main() {
     if (broke.n <= 2) console.log('  → the headless gates located and rebound but the bridge never reached us. Check the server side.');
     else if (broke.n === 3) console.log('  → the spawn site was never reached, or the env object we wrote is no longer the one it spawns with.');
     else if (broke.n === 4) console.log('  → BUN_INSPECT did not survive into the child. Check the env-stripping loop that now runs before the spawn.');
-    else if (broke.n === 5) console.log("  → the child attached but its dHs gate did not rebind. Check buildChildLocatorExpr's anchors.");
-    else console.log('  → dHs rebound but the child still would not use our --sdk-url. Check what childDhsRebind returns.');
+    else if (broke.n === 5) console.log("  → the child attached but its --sdk-url guard did not rebind. Check buildChildLocatorExpr's reject-site regex.");
+    else console.log('  → the guard rebound but the child still would not use our --sdk-url. Check what childDhsRebind returns.');
     if (stderrTail.trim()) console.log(`\n  claude stderr (tail):\n${stderrTail.trim().split('\n').map((l) => '    ' + l).join('\n')}`);
   }
 
