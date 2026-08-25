@@ -2,11 +2,12 @@
 # Full interactive /rc loop: server + injected interactive claude (tmux) + /rc, then drive the
 # connected session from a web client and confirm reply + owner semantics.
 set -u
-cd /home/racel/claude-code-controller
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"  # so a git worktree tests ITS code
+cd "$REPO"
 rm -rf /tmp/ccc-logs; rm -f /tmp/ccc-smoke-server.log
 tmux kill-session -t ccint 2>/dev/null; sleep 0.5
 tmux new-session -d -s ccint -n cli -x 200 -y 50
-tmux new-window -t ccint -n srv "cd /home/racel/claude-code-controller; exec node test/smoke-server.ts >/tmp/srv-stdout.log 2>&1"
+tmux new-window -t ccint -n srv "cd '$REPO'; exec node test/smoke-server.ts >/tmp/srv-stdout.log 2>&1"
 sleep 3
 source test/e2e-auth.sh
 CRED=$(ccc_smoke_token) || exit 1

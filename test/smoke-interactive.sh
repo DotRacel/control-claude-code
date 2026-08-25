@@ -2,11 +2,12 @@
 # Interactive /rc smoke test driver: runs the controller server + an injected interactive
 # claude in tmux, sends /rc, and dumps the injection log + every server request + the TUI.
 set -u
-cd /home/racel/claude-code-controller
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"  # so a git worktree tests ITS code
+cd "$REPO"
 rm -rf /tmp/ccc-logs; rm -f /tmp/ccc-smoke-server.log /tmp/srv-stdout.log /tmp/ccc-smoke-token
 tmux kill-session -t ccsmoke 2>/dev/null; sleep 0.5
 tmux new-session -d -s ccsmoke -n cli -x 200 -y 50
-tmux new-window -t ccsmoke -n srv "cd /home/racel/claude-code-controller; exec node test/smoke-server.ts >/tmp/srv-stdout.log 2>&1"
+tmux new-window -t ccsmoke -n srv "cd '$REPO'; exec node test/smoke-server.ts >/tmp/srv-stdout.log 2>&1"
 sleep 3
 # The credential is issued by the server now; smoke-server.ts drops it here on startup.
 CRED=$(cat /tmp/ccc-smoke-token 2>/dev/null)

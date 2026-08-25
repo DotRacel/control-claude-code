@@ -2,11 +2,12 @@
 # Does the REPL bridge replay the pre-/rc conversation to the data-plane? Establish a
 # distinctive word in the TUI BEFORE /rc, then check whether the server sees it after /rc.
 set -u
-cd /home/racel/claude-code-controller
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"  # so a git worktree tests ITS code
+cd "$REPO"
 rm -rf /tmp/ccc-logs; rm -f /tmp/ccc-smoke-server.log
 tmux kill-session -t cchist 2>/dev/null; sleep 0.5
 tmux new-session -d -s cchist -n cli -x 200 -y 50
-tmux new-window -t cchist -n srv "cd /home/racel/claude-code-controller; exec node test/smoke-server.ts >/tmp/srv-stdout.log 2>&1"
+tmux new-window -t cchist -n srv "cd '$REPO'; exec node test/smoke-server.ts >/tmp/srv-stdout.log 2>&1"
 sleep 3
 source test/e2e-auth.sh
 CRED=$(ccc_smoke_token) || exit 1
