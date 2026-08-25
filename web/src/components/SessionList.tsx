@@ -12,7 +12,7 @@
 import { useEffect, useState } from 'react';
 import type { SessionView } from '../ws.ts';
 import { toolDisplayName } from '../tools.ts';
-import { Lock, Check, Help, SignOut } from '../icons.tsx';
+import { Lock, Check, Help, SignOut, Trash } from '../icons.tsx';
 import { HelpSheet, ConfirmSheet } from './Sheets.tsx';
 import { notifyPermission, requestNotifyPermission } from '../notify.ts';
 
@@ -30,22 +30,30 @@ function relTime(ts: number): string {
   return `${Math.round(s / 86400)} 天前`;
 }
 
+/** One wording for both layouts, so the phone and the rail cannot drift apart on what delete means. */
+export const deleteWarning = (s: SessionView): string =>
+  `「${s.machine || '未知设备'}」的聊天记录会一起删掉，无法恢复。电脑上的 claude 不受影响。`;
+
 function elapsed(since: number): string {
   const s = Math.max(0, Math.round((Date.now() - since) / 1000));
   if (s < 60) return `${s}s`;
   return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
 }
 
-export function SessionList({ sessions, connection, onOpen, onLogout }: {
+export function SessionList({ sessions, connection, onOpen, onLogout, onDelete }: {
   sessions: SessionView[];
   connection: string;
   onOpen: (s: SessionView) => void;
   onLogout: () => void;
+  onDelete?: (s: SessionView) => void;
 }) {
   const [filter, setFilter] = useState<Filter>('active');
   const [perm, setPerm] = useState(notifyPermission());
   const [help, setHelp] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
+  /** The session whose delete is awaiting confirmation, held rather than its id so the sheet can
+   * name it even if the list is re-pushed underneath. */
+  const [confirmDelete, setConfirmDelete] = useState<SessionView | null>(null);
   const [, tick] = useState(0);
 
   // Keep "2m 14s" honest while a tool runs.
@@ -86,7 +94,11 @@ export function SessionList({ sessions, connection, onOpen, onLogout }: {
               {connection === 'online' ? '还没有会话。点右上角的 ? 看怎么开一个。' : '正在连接…'}
             </div>
           )}
-          {shown.map((s) => <SessionCard key={s.id} s={s} onOpen={onOpen} />)}
+          {/* No handler while the socket is down: `deleteSession` would be dropped without a word,
+              and a button that silently does nothing is worse than one that is not there. */}
+          {shown.map((s) => (
+            <SessionCard key={s.id} s={s} onOpen={onOpen} onDelete={onDelete && connection === 'online' ? setConfirmDelete : undefined} />
+          ))}
         </div>
       </div>
       {help && <HelpSheet onDismiss={() => setHelp(false)} />}
@@ -99,41 +111,87 @@ export function SessionList({ sessions, connection, onOpen, onLogout }: {
           onDismiss={() => setConfirmLogout(false)}
         />
       )}
+      {confirmDelete && (
+        <ConfirmSheet
+          title="删除这个会话？"
+          body={deleteWarning(confirmDelete)}
+          confirmLabel="删除"
+          onConfirm={() => { onDelete?.(confirmDelete); setConfirmDelete(null); }}
+          onDismiss={() => setConfirmDelete(null)}
+        />
+      )}
     </div>
   );
 }
 
-export function SessionCard({ s, onOpen, active }: { s: SessionView; onOpen: (s: SessionView) => void; active?: boolean }) {
+/**
+ * The delete affordance, shared by both row shapes.
+ *
+ * A SIBLING of the card, never a child: the card is a `<button>` and nesting one button inside
+ * another is invalid HTML — the browser hoists it out and the two click targets stop being
+ * separable. Hence the `.session-item` wrapper, whose only job is to be the positioning context.
+ *
+ * Absolutely positioned rather than laid out in the row, so a list where only some sessions are
+ * deletable still has one straight right edge, and so the desktop rail can fade it in on hover
+ * without the row's width twitching under the pointer.
+ */
+function DeleteButton({ s, onDelete }: { s: SessionView; onDelete: (s: SessionView) => void }) {
+  return (
+    <button className="row-del" aria-label={`删除会话 ${s.machine || '未知设备'}`} title="删除会话" onClick={() => onDelete(s)}>
+      <Trash size={15} />
+    </button>
+  );
+}
+
+/**
+ * Deletable = offline, and only when the caller offered a handler at all (it withholds one while
+ * the socket is down, since the frame would be dropped silently). A live session is refused by
+ * the server — deleting it would void the ingress token its claude is holding — so a button on
+ * that row could only ever fail.
+ */
+const isDeletable = (s: SessionView, onDelete?: (s: SessionView) => void): boolean =>
+  !!onDelete && s.status !== 'active';
+
+export function SessionCard({ s, onOpen, active, onDelete }: {
+  s: SessionView;
+  onOpen: (s: SessionView) => void;
+  active?: boolean;
+  onDelete?: (s: SessionView) => void;
+}) {
   const d = s.digest ?? ({ toolCalls: 0, pendingApproval: false, turnActive: false } as SessionView['digest']);
   const running = d.toolStatus === 'running' && s.status === 'active';
   const attention = d.pendingApproval;
+  const deletable = isDeletable(s, onDelete);
 
   return (
-    <button
-      className={`session-card${attention ? ' attention' : ''}${!d.turnActive && s.status !== 'active' ? ' done' : ''}${active ? ' current' : ''}`}
-      onClick={() => onOpen(s)}
-    >
-      <div className="session-top">
-        <span className="session-name ellipsis">{s.machine || '未知设备'}</span>
-        {attention
-          ? <span className="badge-approval"><Lock size={11} stroke="#e5895f" />需要审批</span>
-          : <span className="session-when">{relTime(s.lastActivity)}</span>}
-      </div>
-      {d.prompt && <div className="session-prompt">{d.prompt}</div>}
-      <div className="session-meta">
-        {running ? (
-          <>
-            <span className="dot run" />
-            {toolDisplayName(d.tool!)}{d.toolArg ? ` · ${d.toolArg.split('\n')[0].slice(0, 40)}` : ''}
-            {d.toolStartedAt ? ` · ${elapsed(d.toolStartedAt)}` : ''}
-          </>
-        ) : d.toolCalls > 0 ? (
-          <><Check size={12} stroke="#8a8781" />完成 · {d.toolCalls} 次工具调用</>
-        ) : (
-          <><span className={`dot ${s.status === 'active' ? 'on' : 'off'}`} />{s.status === 'active' ? '在线' : '离线'}{s.dir ? ` · ${s.dir}` : ''}</>
-        )}
-      </div>
-    </button>
+    <div className={`session-item${deletable ? ' deletable' : ''}`}>
+      <button
+        className={`session-card${attention ? ' attention' : ''}${!d.turnActive && s.status !== 'active' ? ' done' : ''}${active ? ' current' : ''}`}
+        onClick={() => onOpen(s)}
+      >
+        <div className="session-top">
+          <span className="session-name ellipsis">{s.machine || '未知设备'}</span>
+          {attention
+            ? <span className="badge-approval"><Lock size={11} stroke="#e5895f" />需要审批</span>
+            : <span className="session-when">{relTime(s.lastActivity)}</span>}
+        </div>
+        {d.prompt && <div className="session-prompt">{d.prompt}</div>}
+        <div className="session-meta">
+          {running ? (
+            <>
+              <span className="dot run" />
+              {toolDisplayName(d.tool!)}{d.toolArg ? ` · ${d.toolArg.split('\n')[0].slice(0, 40)}` : ''}
+              {d.toolStartedAt ? ` · ${elapsed(d.toolStartedAt)}` : ''}
+            </>
+          ) : d.toolCalls > 0 ? (
+            <><Check size={12} stroke="#8a8781" />完成 · {d.toolCalls} 次工具调用</>
+          ) : (
+            <><span className={`dot ${s.status === 'active' ? 'on' : 'off'}`} />{s.status === 'active' ? '在线' : '离线'}{s.dir ? ` · ${s.dir}` : ''}</>
+          )}
+        </div>
+      </button>
+      {deletable && <DeleteButton s={s} onDelete={onDelete!} />}
+    </div>
   );
 }
 
@@ -150,7 +208,12 @@ export function SessionCard({ s, onOpen, active }: { s: SessionView; onOpen: (s:
  * rather than a quieter one — the one place the design's "never a dot alone" rule (0c) bends,
  * because the label is still there, just not spending a line.
  */
-export function SessionRow({ s, onOpen, active }: { s: SessionView; onOpen: (s: SessionView) => void; active?: boolean }) {
+export function SessionRow({ s, onOpen, active, onDelete }: {
+  s: SessionView;
+  onOpen: (s: SessionView) => void;
+  active?: boolean;
+  onDelete?: (s: SessionView) => void;
+}) {
   const d = s.digest ?? ({ toolCalls: 0, pendingApproval: false, turnActive: false } as SessionView['digest']);
   const running = d.toolStatus === 'running' && s.status === 'active';
   // One dot for four states, most urgent first: an approval outranks a running tool, which
@@ -161,18 +224,22 @@ export function SessionRow({ s, onOpen, active }: { s: SessionView; onOpen: (s: 
       ? ['run', `运行中 · ${toolDisplayName(d.tool!)}`]
       : s.status === 'active' ? ['on', '在线'] : ['off', '离线'];
   const name = s.machine || '未知设备';
+  const deletable = isDeletable(s, onDelete);
 
   return (
-    <button
-      // No `attention` class: the border it used to colour is gone, so `.dot.wait` is the signal.
-      className={`session-card compact${active ? ' current' : ''}`}
-      onClick={() => onOpen(s)}
-      title={`${name} · ${label}${s.dir ? ` · ${s.dir}` : ''}`}
-    >
-      <span className={`dot ${state}`} />
-      <span className="session-name ellipsis">{name}</span>
-      <span className="sr-only">{label}</span>
-      <span className="session-when">{relTime(s.lastActivity)}</span>
-    </button>
+    <div className={`session-item${deletable ? ' deletable' : ''}`}>
+      <button
+        // No `attention` class: the border it used to colour is gone, so `.dot.wait` is the signal.
+        className={`session-card compact${active ? ' current' : ''}`}
+        onClick={() => onOpen(s)}
+        title={`${name} · ${label}${s.dir ? ` · ${s.dir}` : ''}`}
+      >
+        <span className={`dot ${state}`} />
+        <span className="session-name ellipsis">{name}</span>
+        <span className="sr-only">{label}</span>
+        <span className="session-when">{relTime(s.lastActivity)}</span>
+      </button>
+      {deletable && <DeleteButton s={s} onDelete={onDelete!} />}
+    </div>
   );
 }

@@ -316,3 +316,33 @@ export async function selectHistory(pool: Pool, sessionId: string, limit: number
   );
   return r.rows.map((row) => row.payload);
 }
+
+/**
+ * Delete one session. Its whole transcript goes with it: `events.session_id` is
+ * `references sessions(id) on delete cascade` (schema.sql), so this is one statement, not two —
+ * and the history can never be orphaned by a half-finished delete.
+ */
+export async function deleteSession(pool: Pool, sessionId: string): Promise<void> {
+  await pool.query(`delete from sessions where id = $1`, [sessionId]);
+}
+
+/**
+ * The retention sweep: every session whose last activity predates `cutoff`, gone with its
+ * history. `keepIds` is the set of sessions a child is currently connected to — those are exempt
+ * however old their last event is, because an open SSE stream means quiet, not abandoned.
+ *
+ * Returns what was actually deleted (id + owner) rather than a count: the caller has to tell the
+ * owning credential's web clients to redraw, and it cannot know which accounts were touched
+ * without this. Rows older than the load window are in PG but not in any cache, which is exactly
+ * why the WHERE clause runs here instead of over `store.sessions`.
+ */
+export async function deleteStaleSessions(pool: Pool, cutoff: number, keepIds: string[] = []): Promise<Array<{ id: string; credential: string }>> {
+  const r = await pool.query(
+    `delete from sessions
+      where last_activity < to_timestamp($1/1000.0)
+        and not (id = any($2::text[]))
+      returning id, credential`,
+    [cutoff, keepIds],
+  );
+  return r.rows.map((row) => ({ id: row.id, credential: row.credential }));
+}

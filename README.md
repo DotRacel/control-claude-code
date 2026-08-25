@@ -58,6 +58,11 @@ That brings up the server on `:8787` with PostgreSQL behind it. The image is pub
 on a fresh server means nobody can sign up at all. Point the CLI at it with
 `control-claude --login`.
 
+Sessions are not kept forever: one idle for **7 days** is deleted with its whole transcript
+(`CCC_SESSION_TTL_DAYS`, `0` to keep everything). A session whose claude is still connected is
+never swept. The web app can also delete one on the spot — the trash button on any offline row —
+which is the same deletion, just asked for rather than waited for.
+
 ## Docs
 
 | | |

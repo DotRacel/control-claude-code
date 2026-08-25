@@ -14,12 +14,12 @@
  */
 import { useEffect, useState } from 'react';
 import type { SessionView } from '../../ws.ts';
-import { SessionRow, type Filter } from '../SessionList.tsx';
+import { SessionRow, deleteWarning, type Filter } from '../SessionList.tsx';
 import { desktopSurfaces } from '../../render/desktop.tsx';
 import { Help, SignOut } from '../../icons.tsx';
 import { notifyPermission, requestNotifyPermission } from '../../notify.ts';
 
-export function Sidebar({ shown, activeId, connection, filter, onFilter, onOpen, onLogout }: {
+export function Sidebar({ shown, activeId, connection, filter, onFilter, onOpen, onLogout, onDelete }: {
   /** Already filtered by DesktopShell, in render order. */
   shown: SessionView[];
   activeId: string | null;
@@ -28,10 +28,12 @@ export function Sidebar({ shown, activeId, connection, filter, onFilter, onOpen,
   onFilter: (f: Filter) => void;
   onOpen: (s: SessionView) => void;
   onLogout: () => void;
+  onDelete?: (s: SessionView) => void;
 }) {
   const [perm, setPerm] = useState(notifyPermission());
   const [help, setHelp] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<SessionView | null>(null);
   const [, tick] = useState(0);
 
   // Keep "3 分钟前" honest. Every 30s, not every second: the rows no longer show a running tool's
@@ -72,7 +74,16 @@ export function Sidebar({ shown, activeId, connection, filter, onFilter, onOpen,
               {connection === 'online' ? '还没有会话。点上面的 ? 看怎么开一个。' : '正在连接…'}
             </div>
           )}
-          {shown.map((s) => <SessionRow key={s.id} s={s} onOpen={onOpen} active={s.id === activeId} />)}
+          {shown.map((s) => (
+            <SessionRow
+              key={s.id}
+              s={s}
+              onOpen={onOpen}
+              active={s.id === activeId}
+              // Withheld while the socket is down — the frame would be dropped in silence.
+              onDelete={onDelete && connection === 'online' ? setConfirmDelete : undefined}
+            />
+          ))}
         </div>
       </div>
       {help && <Help_ onDismiss={() => setHelp(false)} />}
@@ -83,6 +94,15 @@ export function Sidebar({ shown, activeId, connection, filter, onFilter, onOpen,
           confirmLabel="退出登录"
           onConfirm={onLogout}
           onDismiss={() => setConfirmLogout(false)}
+        />
+      )}
+      {confirmDelete && (
+        <Confirm
+          title="删除这个会话？"
+          body={deleteWarning(confirmDelete)}
+          confirmLabel="删除"
+          onConfirm={() => { onDelete?.(confirmDelete); setConfirmDelete(null); }}
+          onDismiss={() => setConfirmDelete(null)}
         />
       )}
     </aside>

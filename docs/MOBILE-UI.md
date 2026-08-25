@@ -92,6 +92,14 @@ tool, tool count, needs-approval, model), persisted in a `digest jsonb` column t
 batched UPDATE as `last_activity`. An in-flight approval is deliberately not restored on boot — the
 request died with the process, so the badge must not come back stuck on.
 
+A row can be **deleted** — trash button, offline rows only — which drops the session and its whole
+transcript (`events` is ON DELETE CASCADE, so it is one statement and nothing can be orphaned). The
+offline rule is not a UI preference: deleting a live session voids the ingress token its child is
+holding, and that child would spend the rest of its life reconnecting into a 401. `store.deleteSession`
+enforces it as well, because a row can go online between being drawn and being clicked. The same
+deletion runs on a timer — `CCC_SESSION_TTL_DAYS` (default 7), swept at boot and hourly — which is
+why the list does not grow without bound whether or not anyone presses the button.
+
 Deliberately not built, because the architecture has no channel for it: starting a session from the
 phone (only your terminal can launch `control-claude`), reading/writing the machine's
 permission allowlist, the `@`-file picker, "open in editor", voice, and image upload. Web Push

@@ -21,6 +21,7 @@ import type { ServerResponse } from 'node:http';
 import {
   type Pool, type UserRow, upsertEnv, upsertSession, insertEvents, selectHistory, selectEventByUuid, flushActivity,
   loadRecent, loadUsers, insertUser, updateLastLogin,
+  deleteSession as deleteSessionRow, deleteStaleSessions,
 } from './db.ts';
 import { userTextsFrom } from '../transcript-text.ts';
 import { toolArg, HIDDEN_TOOLS } from '../tool-summary.ts';
@@ -363,6 +364,72 @@ export class Store {
     if (!payload || payload.type !== 'system' || payload.subtype !== 'init') return false;
     const dir = typeof payload.cwd === 'string' && payload.cwd ? payload.cwd : undefined;
     return this.updateSessionMeta(sessionId, { dir });
+  }
+
+  // ── deletion ──
+
+  /**
+   * Forget one session and everything it ever said.
+   *
+   * Refused while a claude is still connected. Deleting a live session voids the ingress token
+   * its child is holding, and the child would then spend the rest of its life reconnecting into
+   * a 401 — so `wsConnected` is the boundary. The web does not draw the button on a live row,
+   * but the rule lives here as well: a row can come online between being drawn and being clicked.
+   *
+   * The transcript goes with the session (`events` is ON DELETE CASCADE) and none of it is
+   * recoverable.
+   */
+  async deleteSession(sessionId: string): Promise<'ok' | 'active' | 'missing'> {
+    const s = this.sessions.get(sessionId);
+    if (!s) return 'missing';
+    if (s.wsConnected) return 'active';
+    this.forget(s);
+    if (this.pool) await deleteSessionRow(this.pool, sessionId);
+    return 'ok';
+  }
+
+  /**
+   * Sessions nobody has touched in `days`, deleted with their history. Returns what went, so the
+   * caller can tell the owning credential's web clients to redraw their list.
+   *
+   * Two details this depends on:
+   *   - the pending `last_activity` bumps are flushed FIRST. touch() only marks a session dirty
+   *     and the writer runs every 30s, so without this a session busy ten seconds ago still looks
+   *     seven days idle in PG, and the sweep would delete it out from under a live transcript.
+   *   - PG decides which rows are stale, not the cache. A session older than the load window was
+   *     never read into memory, and those are precisely the ones most in need of sweeping.
+   *
+   * Connected sessions are exempt no matter how old their last event is — a child holding an open
+   * SSE stream is not stale, it is quiet.
+   */
+  async sweepStale(days = Number(process.env.CCC_SESSION_TTL_DAYS || 7)): Promise<Array<{ id: string; credential: string }>> {
+    if (!(days > 0)) return []; // 0 / negative / NaN — the sweep is off
+    await this.flushActivity();
+    const cutoff = Date.now() - days * 86400_000;
+    const gone: Array<{ id: string; credential: string }> = [];
+    if (this.pool) {
+      const live = [...this.sessions.values()].filter((s) => s.wsConnected).map((s) => s.id);
+      gone.push(...(await deleteStaleSessions(this.pool, cutoff, live)));
+    } else {
+      for (const s of this.sessions.values()) {
+        if (!s.wsConnected && s.lastActivity < cutoff) gone.push({ id: s.id, credential: s.credential });
+      }
+    }
+    for (const { id } of gone) {
+      const s = this.sessions.get(id);
+      if (s) this.forget(s);
+    }
+    return gone;
+  }
+
+  /** Drop every trace of a session from the read cache. PG is the caller's business. */
+  private forget(s: SessionRecord): void {
+    this.sessions.delete(s.id);
+    this.byIngressToken.delete(s.ingressToken);
+    this.memHistory.delete(s.id);
+    // Left behind, the next flush would UPDATE a row that no longer exists. Harmless in itself,
+    // but it would also keep re-queueing a deleted session's digest on every failed retry.
+    this.dirtyActivity.delete(s.id);
   }
 
   // ── work queue (memory only: a lease is meaningless across a restart) ──

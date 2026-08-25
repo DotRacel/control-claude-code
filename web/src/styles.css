@@ -160,6 +160,24 @@ textarea { font: inherit; }
     width: 2px; height: 16px; border-radius: 0 2px 2px 0; background: var(--accent);
   }
   .session-card.compact.current .session-name { color: var(--text); }
+  /* The row is 34px tall and there is no room for a button beside the timestamp, so the button
+     takes the timestamp's place: on hover the time fades out and the button fades in. Nothing
+     moves, and the rail keeps its width whatever the pointer is over. `:focus-within` reveals it
+     too — a keyboard has no hover, and the button would otherwise be tabbable but invisible.
+     Hovering the button itself is still hovering the row, hence the wrapper-level rule for the
+     card's own fill: without it the row would go dark the moment you reached for delete. */
+  .sidebar .session-item:hover .session-card.compact { background: var(--raised); }
+  .sidebar .session-card.compact .session-when { transition: opacity 120ms ease; }
+  .sidebar .row-del {
+    right: 4px; bottom: auto; top: 50%; margin-top: -14px;
+    width: 28px; height: 28px; border-radius: 8px;
+    opacity: 0; pointer-events: none; transition: opacity 120ms ease;
+  }
+  .sidebar .session-item:hover .row-del,
+  .sidebar .session-item:focus-within .row-del { opacity: 1; pointer-events: auto; }
+  .sidebar .session-item:hover .session-when,
+  .sidebar .session-item:focus-within .session-when { opacity: 0; }
+  .sidebar .row-del:hover { background: var(--surface); color: var(--danger); }
 
   /* min-height: 0 on BOTH the grid item and the flex child. A grid item's automatic minimum size
      is its content, so without it .dmain grows past the row and takes the composer off the bottom
@@ -387,6 +405,21 @@ textarea { font: inherit; }
 
 /* ── session list (1a) ── */
 .session-list { padding: 8px var(--gutter) 16px; display: flex; flex-direction: column; gap: 10px; }
+/* Wrapper around one row. Exists for two reasons and no others: a `<button>` cannot contain the
+   delete `<button>` (invalid HTML — the browser hoists it out), and something has to be the
+   positioning context for it. It adds no box of its own. */
+.session-item { position: relative; }
+/* Over the tail of the meta line, inside the card's own 13px/14px padding. Absolute, so a list
+   where only the offline rows are deletable still has one straight right edge. */
+.row-del {
+  position: absolute; right: 7px; bottom: 7px;
+  width: 34px; height: 34px; border-radius: 17px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--muted);
+}
+.row-del:active { background: rgba(245, 244, 239, .08); color: var(--danger); }
+/* Keep the meta line clear of the button instead of letting a long cwd run underneath it. */
+.session-item.deletable .session-meta { padding-right: 30px; }
 .session-card {
   display: block; width: 100%; text-align: left;
   border: 1px solid var(--line); border-radius: 14px; background: var(--raised);
@@ -756,6 +789,9 @@ textarea { font: inherit; }
   .sheet { animation-name: cc-fade; }
   .to-bottom { animation-name: cc-fade; }
   .caret, .spinner, .session-card.compact .dot.run { animation: none; }
+  /* The reveal still happens — it just happens at once. Removing it entirely would leave the
+     delete button permanently visible or permanently hidden, neither of which is the design. */
+  .row-del, .sidebar .session-card.compact .session-when { transition: none; }
   .send { transition: none; }
   .tool-row.press { transform: none; }
 }

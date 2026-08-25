@@ -46,6 +46,7 @@ export const Info = (p: P) => <Svg {...p} width={2.2}><circle cx="12" cy="12" r=
 export const ChevronDown = (p: P) => <Svg {...p} width={2.2}><path d="m8 10 4 4 4-4" /></Svg>;
 export const Gear = (p: P) => <Svg {...p}><circle cx="12" cy="12" r="3.2" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" /></Svg>;
 export const Pencil = (p: P) => <Svg {...p}><path d="M4 20h4L19 9l-4-4L4 16z" /></Svg>;
+export const Trash = (p: P) => <Svg {...p} width={2}><path d="M4.5 6.5h15M9.5 6.5V5a1.5 1.5 0 0 1 1.5-1.5h2A1.5 1.5 0 0 1 14.5 5v1.5M6.5 6.5l.8 12a2 2 0 0 0 2 1.9h5.4a2 2 0 0 0 2-1.9l.8-12M10 10.5v6M14 10.5v6" /></Svg>;
 export const Doc = (p: P) => <Svg {...p}><path d="M6 3h7l5 5v13H6z" /></Svg>;
 export const Brain = (p: P) => <Svg {...p} width={1.8}><path d="M9.5 4.5A3.5 3.5 0 0 0 6 8v.6A3 3 0 0 0 5 14v1a3 3 0 0 0 3 3h1.5M14.5 4.5A3.5 3.5 0 0 1 18 8v.6A3 3 0 0 1 19 14v1a3 3 0 0 1-3 3h-1.5M12 4v16" /></Svg>;
 export const Picture = (p: P) => <Svg {...p} width={2}><rect x="3.5" y="5" width="17" height="14" rx="2.4" /><circle cx="8.8" cy="10" r="1.5" /><path d="m4.5 17.5 4.8-4.8 3 3L15.8 12l3.7 3.7" /></Svg>;

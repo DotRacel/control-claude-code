@@ -15,6 +15,8 @@ services:
       DATABASE_URL: postgres://ccc:ccc@db:5432/ccc
       # Without an invite code registration is closed, so a fresh server nobody can sign up to.
       INVITE_CODE: ${INVITE_CODE:-}
+      # Sessions idle this long are deleted with their transcripts (0 = keep everything forever).
+      CCC_SESSION_TTL_DAYS: ${CCC_SESSION_TTL_DAYS:-7}
     ports:
       - '8787:8787' # NOT loopback-only: the phone reaches this over the LAN
     depends_on:

@@ -252,6 +252,37 @@ async function main() {
   const shots: Shot[] = [
     { name: '01-session-list' },
     {
+      // The 全部 filter is the only place an offline row is on screen, and an offline row is the
+      // only one that carries the delete button — so without this shot the affordance is in no
+      // screenshot at all and could vanish unnoticed. On the desktop rail the button is a hover
+      // reveal, hence the synthetic mouse move onto the offline row.
+      name: '01b-session-list-all',
+      setup: async (c) => {
+        await c.eval(`(() => { const b = [...document.querySelectorAll('.chip')].find(e => e.textContent.trim() === '全部'); b && b.click(); })()`);
+        await sleep(250);
+        const box = await c.eval<{ x: number; y: number } | null>(
+          `(() => { const r = [...document.querySelectorAll('.session-item')].find(e => e.textContent.includes('thinkpad'))?.getBoundingClientRect();
+                    return r ? { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } : null; })()`,
+        );
+        if (box) {
+          await c.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x, y: box.y, buttons: 0 });
+          await sleep(250);
+        }
+      },
+    },
+    {
+      // The confirm dialog, because it is the one screen that has to say plainly what delete takes
+      // (the transcript) and what it does not (the claude running on your machine). Opened, never
+      // confirmed — the shots share one preview server and a real delete would empty it.
+      name: '01c-delete-confirm',
+      setup: async (c) => {
+        await c.eval(`(() => { const b = [...document.querySelectorAll('.chip')].find(e => e.textContent.trim() === '全部'); b && b.click(); })()`);
+        await sleep(250);
+        await c.eval(`(() => { const i = [...document.querySelectorAll('.session-item')].find(e => e.textContent.includes('thinkpad')); i && i.querySelector('.row-del').click(); })()`);
+        await sleep(450);
+      },
+    },
+    {
       name: '02-chat-top',
       setup: async (c) => {
         await c.eval(`(() => { const b = [...document.querySelectorAll('.session-card')].find(e => e.textContent.includes('racel-dev')); b && b.click(); })()`);

@@ -25,13 +25,14 @@ import { SessionSwitcher } from './SessionSwitcher.tsx';
 import { filterSessions, type Filter } from '../SessionList.tsx';
 import { ClaudeMark } from '../../icons.tsx';
 
-export function DesktopShell({ sessions, activeId, connection, sock, onOpen, onLogout, registerEvent, registerHistory }: {
+export function DesktopShell({ sessions, activeId, connection, sock, onOpen, onLogout, onDelete, registerEvent, registerHistory }: {
   sessions: SessionView[];
   activeId: string | null;
   connection: Connection;
   sock: ControlSocket;
   onOpen: (s: SessionView) => void;
   onLogout: () => void;
+  onDelete?: (s: SessionView) => void;
   registerEvent: (cb: (sid: string, p: any) => void) => void;
   registerHistory: (cb: (sid: string, events: any[]) => void) => void;
 }) {
@@ -76,6 +77,7 @@ export function DesktopShell({ sessions, activeId, connection, sock, onOpen, onL
         onFilter={setFilter}
         onOpen={onOpen}
         onLogout={onLogout}
+        onDelete={onDelete}
       />
       <main className="dmain">
         {active ? (
