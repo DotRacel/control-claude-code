@@ -397,6 +397,30 @@ export async function createControllerServer(opts: CreateOpts = {}): Promise<Con
       return res.end(bytes);
     }
 
+    /**
+     * ── `/rc` deep link ──
+     *
+     * The URL the injected TUI prints (and QRs) is `<origin>/code/session_<hex>` — claude builds
+     * that shape itself and `int.weburl` only redirects the origin, so the path is not ours to
+     * choose. It cannot be answered with index.html directly: the SPA is built with vite
+     * `base: './'`, so its asset URLs are RELATIVE and would resolve against `/code/`, where
+     * serveStatic's SPA fallback would hand back index.html as `text/html` for every one of them —
+     * a module script the browser refuses, i.e. a blank page.
+     *
+     * One redirect to the root with the id as a query param keeps every asset resolving from `/`,
+     * and the SPA picks the id up from there (web/src/deeplink.ts). 302 + no-store rather than 301:
+     * a permanent redirect is the wrong promise to make about a link shape we do not own.
+     *
+     * The id-less arm covers the /status footer's `${qVr()}/code` fallback. An id that does not
+     * look like a session id falls through to the SPA instead of redirecting.
+     */
+    if ((method === 'GET' || method === 'HEAD') && (m = /^\/code(?:\/((?:cse|session)_[0-9A-Za-z]{4,64}))?\/?$/.exec(p))) {
+      res.statusCode = 302;
+      res.setHeader('location', m[1] ? `/?s=${encodeURIComponent(m[1])}` : '/');
+      res.setHeader('cache-control', 'no-store');
+      return res.end();
+    }
+
     // ── static SPA (non-API) ──
     if (opts.staticDir && (method === 'GET' || method === 'HEAD')) return serveStatic(opts.staticDir, p, res);
     return json(404, { error: { type: 'not_found', message: p } });

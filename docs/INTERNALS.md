@@ -254,20 +254,81 @@ Unlike headless, the REPL bridge spawns **no child**: the interactive process cr
 code-session and connects the SSE data-plane itself. Two extra server endpoints back it:
 `POST /v1/code/sessions` (createCodeSession, owned by 凭证A) and
 `POST /v1/code/sessions/{id}/bridge` (fetchRemoteCredentials → `worker_jwt` = the session's
-ingress token). Injection rebinds **six** gates (each breakpoint removed after the first hit —
+ingress token). Injection rebinds **seven** connect-path gates (each breakpoint removed after the first hit —
 hot TUI paths): enable the command (`isBridgeEnabled` kill-switch → true); redirect the
 base-url/token overrides → our URL / 凭证A; clear the command preflight (disabled-reason +
 trusted-device); inject a synthetic **org UUID** (a BYOK account has none — this was the real
-blocker); and satisfy the transport init's OAuth check. A relayed web message is treated as
+blocker); satisfy the transport init's OAuth check; and let an `http://` base URL past the scheme
+check, for a self-hosted server on a LAN. A relayed web message is treated as
 **owner** (bridgeOrigin), not a peer — no `client_platform` hack needed here.
 
-- `node test/probe-interactive.ts` — asserts all six gates locate against the installed claude.
+- `node test/probe-interactive.ts` — asserts all nine gates locate against the installed claude.
 - `bash test/e2e-interactive.sh` — the full loop through tmux: inject → `/rc` → session on the
-  server → web message → reply, checking owner semantics.
+  server → web message → reply, checking owner semantics. Also captures the pane twice, once with
+  `-e`, which is how the QR's colours below are checked.
 - `npm test` — the interactive control-plane (createCodeSession ownership + fetchRemoteCredentials
   + data-plane auth).
 
 Run: `node src/control-cli.ts` (log in on first run), then type `/rc` in the TUI.
+
+### The link `/rc` prints, and its QR
+
+Two more gates fix what the user is actually *shown* once the bridge is up. Left alone, the line
+claude prints is a **dead link**: `https://claude.ai/code/session_<hex>` — Anthropic's host,
+carrying a session id our server minted.
+
+- **`int.weburl`** rebinds `qVr`, the origin chooser inside claude's session-URL builder
+  (`rw(id, ingress)` = `` `${qVr(compatId, ingress)}/code/${compatId}` ``), to our backend. The
+  breakpoint is at `rw`'s body entry, before the interpolation, so the first call is already right.
+  Doing it at the origin — rather than faking the message's `url` — is **required**, because the
+  renderer cross-checks `message.url` against `store.replBridgeSessionUrl` and renders nothing if
+  they differ; both read this one value. It also fixes claude's own "Show QR code" dialog, the
+  `/status` footer fallback, and the `Claude-Session:` git commit trailer, all for free.
+- **`int.qrnudge`** draws the QR. It does *not* replace the message factory: that factory's second
+  parameter is `upgradeNudge`, which the only call site leaves undefined and the renderer draws as
+  an optional second row inside a `width:999` box — so multi-line content neither wraps nor needs a
+  renderer patch. A breakpoint at the factory's body entry is *before* that parameter is read, so
+  assigning the **parameter** is enough, the live invocation picks it up, and the message's shape
+  stays entirely claude's.
+
+The encoder (`src/injector/qr.ts`) is [Kazuhiko Arase's qrcode-generator][qrgen], vendored verbatim
+as a string and evaluated into the target during the `?wait=1` pause. It has to run over there: the
+TUI owns the terminal from launch, and the session URL does not exist until long after our last
+chance to print. `test/qr.test.ts` compiles the very string we inject, so the tests are tests of the
+injected payload; the half-block encoding is losslessly invertible, which is what lets them assert
+finder patterns and quiet zones with no second encoder to disagree with.
+
+Two non-obvious things about drawing it:
+
+- **`dimColor` is a colour substitution, not SGR 2.** claude's ink fork resolves it to
+  `theme.inactive`, so there is no "undim" escape and the modules would come out grey — low
+  contrast on a dark terminal and *inverted* on a light one. So each line states black-on-white
+  absolutely, in truecolor, and the vendored renderer's polarity is flipped to match (upstream
+  paints the LIGHT modules, which is right only when the paint is bright-on-dark). Embedded escapes
+  do survive the fork — confirmed by `tmux capture-pane -e` in the e2e.
+- **A symbol is always an odd number of modules across**, so the last text line stands for one real
+  module row plus a half that does not exist. Upstream paints that half; flipped, it would be a
+  black bar across the bottom of the quiet zone. That row is nothing but quiet zone, so it is
+  blanked — after the flip, or the blank inverts back.
+
+Every failure path (encoder missing, terminal too narrow, a URL that is not ours) yields
+`undefined`, which makes the renderer's `nudge && …` falsy: the line renders exactly as it would
+without the feature. `CCC_NO_QR` is not needed — but the QR is ~17 lines, and a narrow terminal
+suppresses it on its own.
+
+The phone half is a redirect plus eight lines of React. `<origin>/code/session_<hex>` cannot serve
+`index.html` directly — the SPA is built with vite `base: './'`, so its relative asset URLs would
+resolve under `/code/` and the SPA fallback would answer each one with HTML — so the server answers
+that path with a 302 to `/?s=<id>` and `web/src/deeplink.ts` reads the id back out at module load,
+before React mounts, rewriting the URL immediately so a reload does not re-force the session.
+Matching is on the id *body*: claude's `toCompatSessionId` is behind a runtime shim, so the link can
+legitimately carry either `cse_` or `session_`.
+
+- `npm run deeplink-browser` — headless chromium through the whole phone path: open the printed
+  link, land in that session's chat. The failure it exists to catch is a blank page from assets
+  resolving under `/code/`, which no unit test would see. Needs `npm run build --prefix web`.
+
+[qrgen]: https://github.com/kazuhikoarase/qrcode-generator
 
 ### CLI contract
 

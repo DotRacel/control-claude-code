@@ -26,5 +26,5 @@ async function main() {
   h.kill();
   setTimeout(() => process.exit(allLocated ? 0 : 1), 200);
 }
-const INTERACTIVE_EXPECTED = 7;
+const INTERACTIVE_EXPECTED = 9;
 main().catch((e) => { console.error('[probe-interactive] fatal:', e); process.exit(1); });

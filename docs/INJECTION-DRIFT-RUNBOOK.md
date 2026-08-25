@@ -144,6 +144,16 @@ Not every diff needs a code change. Work down this list:
 Rule of thumb: **widen for cosmetics, branch for structure.** A widened regex that has to encode an
 "A or B" of two different code shapes is a branch wearing a disguise — branch instead.
 
+**Zeroth question, before any of that: does this gate carry weight?** Two of them do not.
+`int.weburl` and `int.qrnudge` only change what the `/rc` line *shows* — the session link and its
+QR. If either drifts, `/rc` still connects and the phone still works; the user just gets the
+Anthropic-hosted link back, or no QR. So when one of those is the only red row, **let it ride until
+you are touching that area anyway**. Spending the fix-it-now budget on a cosmetic gate is how the
+gates that actually gate things end up waiting.
+
+Read the report accordingly: 9 interactive gates, but only the first seven can cost someone their
+session.
+
 ---
 
 ## 6. Write the gate (or variant)

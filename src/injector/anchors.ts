@@ -397,6 +397,8 @@ export function buildLocatorExpr(globalKey: string, gates: GateSpec[] = GATES): 
 //   isBridgeEnabled      → kill-switch  `OOo()`  ⇒ always-true (the /remote-control command enables)
 //   getBridgeBaseUrl     → override     `D7e()`  ⇒ our URL
 //   getBridgeAccessToken → override     `L7e()`  ⇒ our token (凭证A)
+// then four more that unblock the connect path (preflight / replinit / orguuid / httpscheme), and
+// finally two that fix what the user is SHOWN once it works (weburl / qrnudge).
 // Breakpoints sit at each consumer's function-body entry; those are hot paths under the TUI, so
 // gate-rebind REMOVES each breakpoint after the first hit (headless gates sit on one-shot paths).
 export interface InteractiveGateSpec {
@@ -474,6 +476,65 @@ export const INTERACTIVE_GATES: InteractiveGateSpec[] = [
     rebindRe: '([\\w$]+)=[\\w$]+\\(\\);if\\(\\1\\.startsWith\\("http://"\\)',
     bpAnchor: 'if(${0}.startsWith("http://")',
     rebindValues: ['(function(u){var _s=String.prototype.startsWith;String.prototype.startsWith=function(){String.prototype.startsWith=_s;return!1};return u})(${0})'],
+    sticky: true,
+  },
+  // ── What the user is shown once /rc works ──
+  //
+  // The session URL claude prints is built by `rw(sessionId, ingressUrl)` =
+  // `${qVr(compatId, ingressUrl)}/code/${compatId}`, and `qVr` is the ORIGIN CHOOSER — a three-way
+  // pick between localhost:4000 / the staging host / claude.ai. Left alone it hands the user a
+  // DEAD link: an Anthropic host carrying a session id our server minted (`cse_<hex>`, which
+  // claude's toCompatSessionId renders as `session_<hex>`). Rebinding `qVr` to our backend fixes it
+  // at the source, which matters because the renderer cross-checks the message's url against
+  // `store.replBridgeSessionUrl` — both read this one value, so they stay equal. It also fixes,
+  // for free, claude's own "Show QR code" dialog, the /status footer fallback `${qVr()}/code`, and
+  // the `Claude-Session:` git commit trailer.
+  //
+  // The breakpoint is `rw`'s body entry, i.e. BEFORE the `${qVr(o,t)}` interpolation, so the very
+  // first call is already correct. Not sticky: `qVr` is a bundle-level function declaration, so one
+  // assignment is permanent. Group 1 is `qVr` and deliberately nothing else — `o` is `let`-declared
+  // and still in TDZ here, and gate-rebind assigns EVERY capture group, so capturing it would emit
+  // `o=o` and throw.
+  {
+    id: 'int.weburl',
+    locate: { anchorStr: '/code/${', declKeyword: 'function' },
+    rebindRe: '=`\\$\\{([\\w$]+)\\([\\w$]+,[\\w$]+\\)\\}/code/\\$\\{',
+    rebindValues: ['function(){return ${URL}}'],
+  },
+  // The inline ASCII QR under that line, for scanning with a phone.
+  //
+  // We do NOT replace the message factory. Its second parameter is `upgradeNudge`, which the only
+  // call site leaves undefined, and which the renderer draws as an optional second row
+  // (`<Box row>[<Text dimColor>"⎿  "</Text>, <Text dimColor>{nudge}</Text>]</Box>` inside a
+  // `<Box row width={999}>` — so multi-line content neither wraps nor needs a renderer patch).
+  // A breakpoint at the factory's body entry is BEFORE that parameter is read, so assigning the
+  // PARAMETER is enough: the live invocation picks it up, there is no first-call miss, and we never
+  // have to reproduce type/subtype/content/url/isMeta/timestamp/uuid — the shape stays claude's.
+  //
+  // The regex's `\1`/`\2` backreferences are the drift detector: they assert that parameter 1 is
+  // the url and parameter 2 is the nudge, so a future reshuffle fails loudly instead of quietly
+  // writing a QR into the wrong field. Group 1 is re-assigned to itself — an intentional no-op,
+  // because gate-rebind assigns every group and we need `${0}` to name the url. `${1}||` leaves a
+  // real upgrade nudge alone if claude ever starts passing one.
+  //
+  // Sticky: the factory runs once per bridge-status emit, so a reconnect must get a QR too. Every
+  // failure path (encoder absent, url not ours, terminal too narrow, throw) yields `void 0`, which
+  // makes the renderer's `nudge && …` falsy — the line renders exactly as it does today.
+  //
+  // The anchor is the field NAME, not the sentence. `or at ${e}` reads better and was unique
+  // through 2.1.241, but 2.1.243 added a cloud-session message with the same tail ("Cloud session
+  // active · code here or at ${e}") that sorts FIRST — and findAnchor takes the first hit, so the
+  // walk-back would land in the wrong function entirely. `upgradeNudge:` is unique on every
+  // version measured, and sitting past the span the regex needs leaves the body window its
+  // maximum slack (the locator's window is anchor + 120 chars, and prose grows).
+  {
+    id: 'int.qrnudge',
+    locate: { anchorStr: 'upgradeNudge:', declKeyword: 'function' },
+    rebindRe: 'function [\\w$]+\\(([\\w$]+),([\\w$]+)\\)\\{return\\{type:"system",subtype:"bridge_status",content:`[^`]*`,url:\\1,upgradeNudge:\\2,',
+    rebindValues: [
+      '${0}',
+      '(${1}||(function(_u){try{return globalThis.__cccQr(_u,{origin:${URL},maxWidth:((typeof process!=="undefined"&&process.stdout&&process.stdout.columns)||80)-6})||void 0}catch(_e){return void 0}})(${0}))',
+    ],
     sticky: true,
   },
 ];

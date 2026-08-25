@@ -290,3 +290,31 @@ test('a payload claiming a scriptable media type is served as a download', async
   });
 });
 
+test('the /rc session link redirects to the SPA root with the id as a query param', async () => {
+  await withServer(async (server) => {
+    // The TUI prints `<origin>/code/session_<hex>`. That path cannot serve index.html directly:
+    // the SPA is built with vite base:'./', so its relative asset URLs would resolve under
+    // /code/, where the SPA fallback would answer each one with index.html as text/html. One
+    // redirect keeps every asset resolving from /.
+    const hop = async (p: string) => {
+      const r = await fetch(server.baseUrl + p, { redirect: 'manual' });
+      return { status: r.status, location: r.headers.get('location'), cache: r.headers.get('cache-control') };
+    };
+
+    assert.deepEqual(await hop('/code/session_5927e50246ee2379'), {
+      status: 302,
+      location: '/?s=session_5927e50246ee2379',
+      cache: 'no-store',
+    });
+    // claude's compat shim can hand out either prefix for the same session.
+    assert.equal((await hop('/code/cse_5927e50246ee2379')).location, '/?s=cse_5927e50246ee2379');
+    // The /status footer's fallback link carries no id at all.
+    assert.equal((await hop('/code')).location, '/');
+    assert.equal((await hop('/code/')).location, '/');
+    // Anything that does not look like a session id is not ours to redirect. These tests run with
+    // no staticDir, so it falls through to the 404 rather than to the SPA.
+    assert.equal((await hop('/code/session_x')).status, 404, 'too short to be a session id');
+    assert.equal((await hop('/code/session_5927e5/extra')).status, 404, 'a deeper path is not a session');
+  });
+});
+

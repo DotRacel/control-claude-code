@@ -6,6 +6,7 @@ import { SessionList } from './components/SessionList.tsx';
 import { ChatView } from './components/ChatView.tsx';
 import { AuthGate } from './components/AuthGate.tsx';
 import { DesktopShell } from './components/desktop/DesktopShell.tsx';
+import { takeDeepLinkSession, sessionIdBody } from './deeplink.ts';
 
 /**
  * Where the two layouts part company. Live, not once at startup: the breakpoint has to be
@@ -79,6 +80,30 @@ function Home({ credential, onLogout }: { credential: string; onLogout: () => vo
   useEffect(() => {
     if (connection === 'online' && activeId) sockRef.current?.subscribe(activeId);
   }, [connection]);
+
+  /**
+   * A session id scanned off the `/rc` QR (or typed from the link). It arrives before the socket
+   * does, so it waits here until the session list names it.
+   *
+   * It lives in `Home`, above the layout branch, because `activeId` is the one piece of state both
+   * layouts read — so the deep link behaves identically wide and narrow, and cannot fight the
+   * breakpoint. The lazy `useState` initialiser matters: consuming the id in a `useRef(...)`
+   * argument would re-run and throw the value away on the second render.
+   *
+   * Matching is on the id BODY, not the prefix: claude's `toCompatSessionId` is behind a runtime
+   * shim, so the URL can legitimately carry either `cse_` or `session_` for the same session.
+   */
+  const [wanted, setWanted] = useState(() => takeDeepLinkSession());
+  useEffect(() => {
+    if (!wanted || activeId) return;
+    const hit =
+      sessions.find((s) => s.id === wanted) ??
+      sessions.find((s) => sessionIdBody(s.id) === sessionIdBody(wanted));
+    if (hit) {
+      setWanted(null);
+      setActiveId(hit.id);
+    }
+  }, [sessions, activeId, wanted]);
 
   const active = activeId ? sessions.find((s) => s.id === activeId) ?? null : null;
 

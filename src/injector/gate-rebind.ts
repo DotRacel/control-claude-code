@@ -21,6 +21,7 @@ import { InspectorClient } from './ws-client.ts';
 import { getFreePort, waitForPort, runLocator, treeKiller, DEFAULT_CLAUDE } from './attach.ts';
 import { fill, buildLocatorExpr, buildInteractiveLocatorExpr, buildChildLocatorExpr, childDhsRebind, type RebindConfig } from './anchors.ts';
 import { newestProfile, resolveProfile, type ResolvedProfile } from './profiles.ts';
+import { QR_INJECT_SOURCE } from './qr.ts';
 
 /**
  * Start resolving the injection profile WITHOUT blocking the launch.
@@ -392,6 +393,17 @@ export async function launchInteractiveWithGatesRebound(opts: InteractiveLaunchO
     // The interactive path shouldn't spawn a remote-control child, but strip BUN_INSPECT
     // anyway so nothing it launches inherits a wait URL.
     await ic.send('Runtime.evaluate', { expression: 'try{delete process.env.BUN_INSPECT;delete process.env.BUN_INSPECT_NOTIFY;delete process.env.BUN_INSPECT_CONNECT_TO}catch(e){}; "ok"', returnByValue: true }).catch(() => {});
+
+    // Install the QR encoder while we still hold the wait state, so `int.qrnudge` can call it
+    // synchronously from its paused frame later. Fail-safe by construction and by intent: if this
+    // never lands, `globalThis.__cccQr` is undefined, that gate's `try/catch` yields `void 0`, and
+    // the `/rc` line renders exactly as it does without this feature. Hence `.catch(() => {})` and
+    // a log line rather than a throw — a QR must never be able to cost someone their session.
+    const qrOk = await ic
+      .send('Runtime.evaluate', { expression: QR_INJECT_SOURCE, returnByValue: true })
+      .then(rval)
+      .catch((e) => 'ERR:' + e.message);
+    log(`[int] qr encoder install: ${qrOk === 'ok' ? `ok (${QR_INJECT_SOURCE.length}B)` : `FAILED (${qrOk}) — /rc will print the link without a QR`}`);
 
     const reports: GateReport[] = [];
     const namesById = new Map<string, string[]>();
