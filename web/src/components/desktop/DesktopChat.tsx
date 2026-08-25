@@ -21,6 +21,7 @@ import { ActivityLine, Banner } from '../../render/parts.tsx';
 import { desktopRenderers, desktopSurfaces } from '../../render/desktop.tsx';
 import { Composer } from '../Composer.tsx';
 import { Dots } from '../../icons.tsx';
+import { useT } from '../../i18n/react.ts';
 
 export function DesktopChat({ session, sock, connection, registerEvent, registerHistory }: {
   session: SessionView;
@@ -29,6 +30,7 @@ export function DesktopChat({ session, sock, connection, registerEvent, register
   registerEvent: (cb: (sid: string, p: any) => void) => void;
   registerHistory: (cb: (sid: string, events: any[]) => void) => void;
 }) {
+  const t = useT();
   const {
     state, busy, offline, actions, send, stop, answerPermission, output, setOutput, announce, meta,
   } = useSession({ session, sock, connection, registerEvent, registerHistory });
@@ -43,15 +45,15 @@ export function DesktopChat({ session, sock, connection, registerEvent, register
     <section className="dchat">
       <header className="dchat-head">
         <div className="dchat-title">
-          <div className="t1 ellipsis">{session.machine || state.live.cwd || session.dir || '会话'}</div>
-          <div className="t2 ellipsis">{meta || 'Remote Control 会话'}</div>
+          <div className="t1 ellipsis">{session.machine || state.live.cwd || session.dir || t({ k: 'chat.session' })}</div>
+          <div className="t2 ellipsis">{meta || t({ k: 'chat.rcSession' })}</div>
         </div>
         <div className="dchat-head-actions">
-          <button className="icon-btn" aria-label="更多" onClick={() => setMenu(true)}><Dots size={17} /></button>
+          <button className="icon-btn" data-testid="session-menu" aria-label={t({ k: 'a11y.more' })} onClick={() => setMenu(true)}><Dots size={17} /></button>
           {/* The popover anchors to this corner, so it is rendered inside it. */}
           {menu && (
             <Menu
-              meta={meta || '会话'}
+              meta={meta || t({ k: 'chat.session' })}
               mode={state.live.permissionMode}
               onMode={(m) => sock.control(session.id, 'set_permission_mode', { mode: m })}
               onEnd={stop}

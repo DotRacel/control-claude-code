@@ -25,6 +25,9 @@ import { toolArg, HIDDEN_TOOLS, QUESTION_TOOL } from '../../src/tool-summary.ts'
 import { isPushNotificationToolUse } from '../../src/push-event.ts';
 import { imageAttachmentsOf, toolResultText, type ImageAttachment } from '../../src/image-blob.ts';
 import { shapeOf, verdictOf, unknownBlockTypes } from '../../src/wire-shape.ts';
+// Type-only, and that is the point: the reducer names catalog KEYS but never loads a catalog, so
+// its runtime graph stays free of i18n entirely and this file still folds identically in Node.
+import type { Msg } from './i18n/msg.ts';
 
 /** Task tools that mutate the list render as a checklist card, not as a tool row. */
 export const TODO_TOOLS = new Set(['TaskCreate', 'TaskUpdate']);
@@ -50,7 +53,9 @@ export interface ToolCall {
 export interface QuestionOption { label: string; description?: string; preview?: string }
 export interface Question { question: string; header?: string; multiSelect?: boolean; options: QuestionOption[] }
 
-export interface TodoTask { key: string; subject: string; status: 'pending' | 'in_progress' | 'completed' | 'deleted' }
+/** `subject` is the task's own text off the wire, so it is normally a bare (untranslated) string —
+ * only the "the payload never said" fallbacks are catalog keys. */
+export interface TodoTask { key: string; subject: Msg; status: 'pending' | 'in_progress' | 'completed' | 'deleted' }
 
 export interface PermissionRequest {
   requestId: string;
@@ -70,16 +75,16 @@ export type Item =
   | { kind: 'thinking'; id: number; text: string; tokens?: number; streaming?: boolean; fromStream?: boolean }
   | { kind: 'tools'; id: number; calls: ToolCall[] }
   | { kind: 'todo'; id: number; tasks: TodoTask[] }
-  | { kind: 'question'; id: number; requestId: string; toolUseId?: string; questions: Question[]; answered?: string }
+  | { kind: 'question'; id: number; requestId: string; toolUseId?: string; questions: Question[]; answered?: Msg }
   // `detail`/`phases`/`tools`/`ms` come from system:task_progress, which the CLI emits while a
   // background task runs — without them a task card is a spinner with no news for minutes.
   // `interrupted` is not a CLI status: it is what a running task becomes when the worker goes
   // away. Neither 'completed' (it did not finish) nor 'failed' (nothing went wrong) is honest.
-  | { kind: 'bgtask'; id: number; taskId: string; description: string; status: 'running' | 'completed' | 'failed' | 'interrupted';
+  | { kind: 'bgtask'; id: number; taskId: string; description: Msg; status: 'running' | 'completed' | 'failed' | 'interrupted';
       detail?: string; phases?: string[]; tools?: number; ms?: number }
-  | { kind: 'status'; id: number; text: string }
+  | { kind: 'status'; id: number; text: Msg }
   /** A hard break in the conversation: /clear, a compaction, the worker going away. */
-  | { kind: 'divider'; id: number; label: string }
+  | { kind: 'divider'; id: number; label: Msg }
   /**
    * A payload whose shape nobody has decided about yet (src/wire-shape.ts). It renders as a faint
    * marker rather than nothing at all: the transcript must never silently skip a beat, because a
@@ -87,7 +92,9 @@ export type Item =
    * chatty unknown subtype cannot flood the transcript.
    */
   | { kind: 'unknown'; id: number; shape: string; count: number }
-  | { kind: 'error'; id: number; title: string; detail?: string };
+  /** `title` is ours to word for a failure we recognise, and the wire's own subtype otherwise;
+   * `detail` is always the payload's text and is never translated. */
+  | { kind: 'error'; id: number; title: Msg; detail?: string };
 
 export interface Live {
   busy: boolean;
@@ -245,13 +252,14 @@ function applyTodoTool(d: Draft, call: { toolUseId: string; name: string; input:
   d.todos = d.todos.slice();
   if (call.name === 'TaskCreate') {
     // The numeric id only exists in the tool_result; key on the tool_use id until then.
-    d.todos.push({ key: call.toolUseId, subject: String(input.subject ?? input.description ?? '任务'), status: 'pending' });
+    const subject = input.subject ?? input.description;
+    d.todos.push({ key: call.toolUseId, subject: subject ? String(subject) : { k: 'todo.untitled' }, status: 'pending' });
   } else {
     const id = String(input.taskId ?? '');
     const found = d.todos.findIndex((t) => t.key === id);
     const status = ['pending', 'in_progress', 'completed', 'deleted'].includes(input.status) ? input.status : undefined;
     if (found >= 0) d.todos[found] = { ...d.todos[found], ...(input.subject ? { subject: String(input.subject) } : {}), ...(status ? { status } : {}) };
-    else if (id) d.todos.push({ key: id, subject: String(input.subject ?? `任务 #${id}`), status: status ?? 'pending' });
+    else if (id) d.todos.push({ key: id, subject: input.subject ? String(input.subject) : { k: 'todo.numbered', p: { id } }, status: status ?? 'pending' });
   }
   d.todos = d.todos.filter((t) => t.status !== 'deleted');
   snapshotTodos(d);
@@ -378,7 +386,7 @@ function system(d: Draft, p: any): TranscriptState {
       const done = str(p.compact_result);
       if (done) {
         d.live.compacting = false;
-        if (done !== 'success') push(d, { kind: 'error', title: '压缩失败', detail: done });
+        if (done !== 'success') push(d, { kind: 'error', title: { k: 'compact.failed' }, detail: done });
         return d;
       }
       // Any other notice under this subtype. Declaring `system:status` handled must not silently
@@ -394,16 +402,18 @@ function system(d: Draft, p: any): TranscriptState {
       const m = p.compact_metadata ?? {};
       const pre = Number(m.pre_tokens);
       const post = Number(m.post_tokens);
+      // The token figures are numerals in every language, so they stay a literal fragment; only
+      // the trigger word needs one, and it carries its own separator (see compact.* in zh.ts).
       const size = Number.isFinite(pre) && Number.isFinite(post) ? ` · ${ktok(pre)} → ${ktok(post)}` : '';
-      const why = m.trigger === 'manual' ? ' · 手动' : m.trigger === 'auto' ? ' · 自动' : '';
+      const why: Msg = m.trigger === 'manual' ? { k: 'compact.manual' } : m.trigger === 'auto' ? { k: 'compact.auto' } : '';
       d.live.compacting = false;
-      push(d, { kind: 'divider', label: `上下文已压缩${why}${size}` });
+      push(d, { kind: 'divider', label: { k: 'divider.compacted', p: { why, size } } });
       return d;
     }
     case 'task_started': {
       const taskId = String(p.task_id ?? '');
       if (!taskId || d.items.some((i) => i.kind === 'bgtask' && i.taskId === taskId)) return d;
-      push(d, { kind: 'bgtask', taskId, description: String(p.description ?? '后台任务'), status: 'running' });
+      push(d, { kind: 'bgtask', taskId, description: p.description ? String(p.description) : { k: 'bgtask.untitled' }, status: 'running' });
       return d;
     }
     case 'task_notification': {
@@ -411,7 +421,7 @@ function system(d: Draft, p: any): TranscriptState {
       const status = p.status === 'failed' ? 'failed' : 'completed';
       const at = d.items.findIndex((i) => i.kind === 'bgtask' && i.taskId === taskId);
       if (at >= 0) d.items[at] = { ...(d.items[at] as any), status };
-      else if (taskId) push(d, { kind: 'bgtask', taskId, description: String(p.summary ?? '后台任务'), status });
+      else if (taskId) push(d, { kind: 'bgtask', taskId, description: p.summary ? String(p.summary) : { k: 'bgtask.untitled' }, status });
       return d;
     }
     case 'background_tasks_changed': {
@@ -458,10 +468,14 @@ function system(d: Draft, p: any): TranscriptState {
       // Emitted after the agent commits or pushes — worth a line, since it is the one kind of
       // side effect you cannot undo by reading further.
       const kind = String(p.kind ?? '');
-      const label = kind === 'commit' ? '已提交' : kind === 'push' ? '已推送' : kind ? `git ${kind}` : '';
+      // A verb we recognise gets a catalog key; anything else is the wire's own subcommand name,
+      // which is a git word and stays one.
+      const label: Msg | null = kind === 'commit' ? { k: 'status.committed' }
+        : kind === 'push' ? { k: 'status.pushed' }
+        : kind ? `git ${kind}` : null;
       if (!label) return d;
       const branch = typeof p.branch === 'string' && p.branch ? ` · ${p.branch}` : '';
-      push(d, { kind: 'status', text: `${label}${branch}` });
+      push(d, { kind: 'status', text: { k: 'status.vcs', p: { label, branch } } });
       return d;
     }
     case 'worker_shutting_down': {
@@ -473,8 +487,10 @@ function system(d: Draft, p: any): TranscriptState {
         const it = d.items[i];
         if (it.kind === 'bgtask' && it.status === 'running') d.items[i] = { ...it, status: 'interrupted' };
       }
-      const reason = p.reason === 'host_exit' ? '终端已退出' : typeof p.reason === 'string' && p.reason ? String(p.reason) : '';
-      push(d, { kind: 'divider', label: reason ? `会话已断开 · ${reason}` : '会话已断开' });
+      // 'host_exit' is the one reason we have words for; any other is the worker's own string.
+      const reason: Msg | null = p.reason === 'host_exit' ? { k: 'divider.hostExit' }
+        : typeof p.reason === 'string' && p.reason ? String(p.reason) : null;
+      push(d, { kind: 'divider', label: reason ? { k: 'divider.disconnectedWhy', p: { reason } } : { k: 'divider.disconnected' } });
       return d;
     }
     case 'api_error':
@@ -681,7 +697,7 @@ function controlCancel(d: Draft, p: any): TranscriptState {
     if (toolUseId) patchCall(d, toolUseId, { status: 'running' });
   }
   const q = d.items.findIndex((i) => i.kind === 'question' && i.requestId === requestId && !i.answered);
-  if (q >= 0) d.items[q] = { ...(d.items[q] as Extract<Item, { kind: 'question' }>), answered: '已在终端处理' };
+  if (q >= 0) d.items[q] = { ...(d.items[q] as Extract<Item, { kind: 'question' }>), answered: { k: 'question.handledInTerminal' } };
   return d;
 }
 
@@ -693,7 +709,7 @@ function controlCancel(d: Draft, p: any): TranscriptState {
 function conversationReset(d: Draft): TranscriptState {
   endTurn(d);
   d.todos = [];
-  push(d, { kind: 'divider', label: '对话已重置' });
+  push(d, { kind: 'divider', label: { k: 'divider.reset' } });
   return d;
 }
 
@@ -712,11 +728,12 @@ function rateLimit(d: Draft, p: any): TranscriptState {
   const status = str(info.status);
   if (!status || status === 'allowed') return d;
   const at = Number(info.resetsAt);
-  const when = Number.isFinite(at) && at > 0
-    ? ` · ${new Date(at * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 重置`
-    : '';
-  const window = str(info.rateLimitType) === 'five_hour' ? '5 小时额度' : str(info.rateLimitType) ?? '额度';
-  push(d, { kind: 'status', text: `${window} · ${status}${when}` });
+  // The ×1000 is wire semantics and belongs here. How that instant READS as a clock is not, and
+  // handing it over as a `{ t }` param is what let this reducer stop naming a language at all.
+  const when: Msg = Number.isFinite(at) && at > 0 ? { k: 'status.resetsAt', p: { time: { t: at } } } : '';
+  const kind = str(info.rateLimitType);
+  const window: Msg = kind === 'five_hour' ? { k: 'status.quotaFiveHour' } : kind ? kind : { k: 'status.quota' };
+  push(d, { kind: 'status', text: { k: 'status.rateLimit', p: { window, status, when } } });
   return d;
 }
 
@@ -755,7 +772,7 @@ export function localSend(state: TranscriptState, text: string, queued: boolean)
 }
 
 /** Fold our own answer into the card so it settles without waiting for the round trip. */
-export function markQuestionAnswered(state: TranscriptState, requestId: string, summary: string): TranscriptState {
+export function markQuestionAnswered(state: TranscriptState, requestId: string, summary: Msg): TranscriptState {
   const d = draftOf(state);
   const at = d.items.findIndex((i) => i.kind === 'question' && i.requestId === requestId);
   if (at >= 0) d.items[at] = { ...(d.items[at] as any), answered: summary };

@@ -15,7 +15,9 @@ import type { PermissionAnswer } from '../ws.ts';
 import { toolDisplayName, toolArg, durationLabel } from '../tools.ts';
 import { haptic } from '../haptics.ts';
 import { useCopy } from '../clipboard.ts';
-import { Lock, Copy, Info, Gear, Pencil } from '../icons.tsx';
+import { Lock, Copy, Info, Gear, Pencil, Globe } from '../icons.tsx';
+import { t, setLocale, LOCALES, type MsgKey } from '../i18n/index.ts';
+import { useT, useLocale, tNode } from '../i18n/react.ts';
 
 /** The worker's own suggestion, phrased as a button. Only ever what it offered — the client
  * never invents a rule, and it cannot reach the machine's settings.json. */
@@ -26,8 +28,8 @@ function suggestionLabel(s: any): string | null {
     if (!r) return null;
     return r.ruleContent ? `${r.toolName}(${r.ruleContent})` : String(r.toolName ?? '');
   }
-  if (s.type === 'setMode') return s.mode === 'acceptEdits' ? '自动接受编辑' : String(s.mode ?? '');
-  if (s.type === 'addDirectories') return (Array.isArray(s.directories) ? s.directories[0] : '') || '该目录';
+  if (s.type === 'setMode') return s.mode === 'acceptEdits' ? t({ k: 'mode.acceptEdits' }) : String(s.mode ?? '');
+  if (s.type === 'addDirectories') return (Array.isArray(s.directories) ? s.directories[0] : '') || t({ k: 'perm.thisDir' });
   return null;
 }
 
@@ -36,6 +38,7 @@ export function PermissionBody({ req, cwd, onAnswer }: {
   cwd?: string;
   onAnswer: (a: PermissionAnswer) => void;
 }) {
+  const t = useT();
   const name = req.displayName || toolDisplayName(req.toolName);
   const arg = toolArg(req.toolName, req.input);
   const suggestion = req.suggestions.map((s) => ({ s, label: suggestionLabel(s) })).find((x) => x.label);
@@ -45,26 +48,27 @@ export function PermissionBody({ req, cwd, onAnswer }: {
       <div className="perm-head">
         <span className="perm-icon"><Lock size={19} stroke="#e5895f" /></span>
         <div>
-          <div className="t1">{name} 想要执行：</div>
-          {cwd && <div className="t2">在 {cwd}</div>}
+          <div className="t1">{t({ k: 'perm.wantsToRun', p: { name } })}</div>
+          {cwd && <div className="t2">{t({ k: 'perm.inDir', p: { cwd } })}</div>}
         </div>
       </div>
       <div className="perm-cmd">{arg || JSON.stringify(req.input, null, 2)}</div>
       {req.reason && <div className="perm-why"><Info size={13} />{req.reason}</div>}
       <div className="perm-actions">
-        <button className="btn primary tall" onClick={() => { haptic('light'); onAnswer({ behavior: 'allow' }); }}>允许一次</button>
+        <button className="btn primary tall" onClick={() => { haptic('light'); onAnswer({ behavior: 'allow' }); }}>{t({ k: 'perm.allowOnce' })}</button>
         {suggestion && (
           <button className="btn tall" onClick={() => { haptic('light'); onAnswer({ behavior: 'allow', updatedPermissions: [suggestion.s] }); }}>
-            总是允许<span className="rule">{suggestion.label}</span>
+            {t({ k: 'perm.alwaysAllow' })}<span className="rule">{suggestion.label}</span>
           </button>
         )}
-        <button className="btn tall danger" onClick={() => { haptic('medium'); onAnswer({ behavior: 'deny' }); }}>拒绝</button>
+        <button className="btn tall danger" onClick={() => { haptic('medium'); onAnswer({ behavior: 'deny' }); }}>{t({ k: 'perm.deny' })}</button>
       </div>
     </div>
   );
 }
 
 export function OutputBody({ call }: { call: ToolCall }) {
+  const t = useT();
   const dur = durationLabel(call.endedAt && call.startedAt ? call.endedAt - call.startedAt : undefined);
   const body = call.result ?? '';
   const { label, failed, copy } = useCopy(body);
@@ -76,12 +80,12 @@ export function OutputBody({ call }: { call: ToolCall }) {
           <div className="t2">{toolArg(call.name, call.input)}</div>
         </div>
         <div className="out-meta">
-          {call.status === 'error' ? <span style={{ color: 'var(--danger)' }}>失败</span> : '完成'}
+          {call.status === 'error' ? <span style={{ color: 'var(--danger)' }}>{t({ k: 'tool.failed' })}</span> : t({ k: 'tool.done' })}
           {dur && <><br />{dur}</>}
         </div>
       </div>
       <div className="sheet-scroll">
-        <div className={`out-body${call.status === 'error' ? ' fail' : ''}`}>{body || '（没有输出）'}</div>
+        <div className={`out-body${call.status === 'error' ? ' fail' : ''}`}>{body || t({ k: 'output.empty' })}</div>
       </div>
       <div className="out-actions">
         <button className={`btn${failed ? ' fail' : ''}`} style={{ flex: 1 }} onClick={copy}><Copy size={15} />{label}</button>
@@ -90,11 +94,12 @@ export function OutputBody({ call }: { call: ToolCall }) {
   );
 }
 
-const MODES: Array<{ id: string; label: string }> = [
-  { id: 'default', label: '每次询问' },
-  { id: 'acceptEdits', label: '自动接受编辑' },
-  { id: 'plan', label: '计划模式' },
-  { id: 'bypassPermissions', label: '不再询问' },
+/** The `id` is the worker's own mode string and stays verbatim; only the label has a language. */
+const MODES: Array<{ id: string; label: MsgKey }> = [
+  { id: 'default', label: 'mode.default' },
+  { id: 'acceptEdits', label: 'mode.acceptEdits' },
+  { id: 'plan', label: 'mode.plan' },
+  { id: 'bypassPermissions', label: 'mode.bypassPermissions' },
 ];
 
 export function MenuBody({ meta, mode, onMode, onEnd, onDismiss }: {
@@ -104,31 +109,52 @@ export function MenuBody({ meta, mode, onMode, onEnd, onDismiss }: {
   onEnd: () => void;
   onDismiss: () => void;
 }) {
-  const [modes, setModes] = useState(false);
+  const t = useT();
+  const locale = useLocale();
+  // One `page` instead of the old boolean, now that there are two sub-pages to drill into.
+  const [page, setPage] = useState<'root' | 'modes' | 'lang'>('root');
+  const modeLabel = MODES.find((m) => m.id === mode)?.label;
   return (
     <>
       <div className="menu-meta">{meta}</div>
-      {modes ? (
+      {page === 'modes' ? (
         <>
-          <div className="menu-label">权限模式</div>
+          <div className="menu-label">{t({ k: 'menu.permMode' })}</div>
           <div className="menu-group">
             {MODES.map((m) => (
               <button key={m.id} className="menu-row" onClick={() => { haptic('light'); onMode(m.id); onDismiss(); }}>
-                <Gear size={18} />{m.label}
-                {mode === m.id && <span className="val">当前</span>}
+                <Gear size={18} />{t({ k: m.label })}
+                {mode === m.id && <span className="val">{t({ k: 'menu.current' })}</span>}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : page === 'lang' ? (
+        <>
+          <div className="menu-label">{t({ k: 'menu.language' })}</div>
+          <div className="menu-group">
+            {/* No onDismiss: the point of switching language is to SEE it happen, and closing the
+                sheet on the tap would hide the one screen that just changed. */}
+            {LOCALES.map((l) => (
+              <button key={l.id} className="menu-row" onClick={() => { haptic('light'); setLocale(l.id); }}>
+                <Globe size={18} />{t({ k: l.name })}
+                {locale === l.id && <span className="val">{t({ k: 'menu.current' })}</span>}
               </button>
             ))}
           </div>
         </>
       ) : (
         <div className="menu-group">
-          <button className="menu-row" onClick={() => setModes(true)}>
-            <Gear size={18} />权限模式<span className="val">{MODES.find((m) => m.id === mode)?.label ?? mode ?? '—'}</span>
+          <button className="menu-row" onClick={() => setPage('modes')}>
+            <Gear size={18} />{t({ k: 'menu.permMode' })}<span className="val">{modeLabel ? t({ k: modeLabel }) : mode ?? '—'}</span>
+          </button>
+          <button className="menu-row" onClick={() => setPage('lang')}>
+            <Globe size={18} />{t({ k: 'menu.language' })}<span className="val">{t({ k: locale === 'zh' ? 'lang.zh' : 'lang.en' })}</span>
           </button>
           {/* Rename needs a column the sessions table does not have yet. */}
-          <button className="menu-row" disabled style={{ opacity: .4 }}><Pencil size={18} />重命名会话<span className="val">下一版</span></button>
+          <button className="menu-row" disabled style={{ opacity: .4 }}><Pencil size={18} />{t({ k: 'menu.renameSession' })}<span className="val">{t({ k: 'menu.nextVersion' })}</span></button>
           <button className="menu-row danger" onClick={() => { haptic('medium'); onEnd(); onDismiss(); }}>
-            <span style={{ width: 15, height: 15, borderRadius: 3, background: 'var(--danger)', display: 'block' }} />停止当前回合
+            <span style={{ width: 15, height: 15, borderRadius: 3, background: 'var(--danger)', display: 'block' }} />{t({ k: 'menu.stopTurn' })}
           </button>
         </div>
       )}
@@ -154,30 +180,36 @@ function Cmd({ text }: { text: string }) {
  * only useful answer is how to install and run the thing that can.
  */
 export function HelpBody() {
+  const t = useT();
   return (
     <>
-      <div className="menu-meta">把电脑上的 claude 接到手机</div>
+      <div className="menu-meta">{t({ k: 'help.meta' })}</div>
       <div className="sheet-scroll">
         <div className="sheet-pad">
           <ol className="help-steps">
             <li>
-              <b>在电脑上装好本项目</b>
-              <p>需要 Node ≥ 22 和已经能用的 <code>claude</code>。</p>
+              <b>{t({ k: 'help.step1Title' })}</b>
+              {/* tNode, not t: the <code> spans are structure, and splitting the sentence into
+                  three keys would leave every language to reassemble it in the right order. */}
+              <p>{tNode({ k: 'help.step1Body' }, { code: <code>claude</code> })}</p>
               <Cmd text="npm i -g control-claude-code" />
             </li>
             <li>
-              <b>用同一个账号登录</b>
-              <p>第一次运行会让你选服务器（填你现在打开的这个地址），再用手机上这个账号登录。答案存在 <code>~/.config/control-claude-code/config.json</code>，之后直接启动；<code>--login</code> 可以换服务器或账号。</p>
+              <b>{t({ k: 'help.step2Title' })}</b>
+              <p>{tNode({ k: 'help.step2Body' }, {
+                config: <code>~/.config/control-claude-code/config.json</code>,
+                login: <code>--login</code>,
+              })}</p>
               <Cmd text="control-claude" />
             </li>
             <li>
-              <b>在 TUI 里输入 /rc</b>
-              <p>会话立刻出现在这个列表里，之后的对话和工具审批都会推到手机上。</p>
-              <Cmd text={'/rc\n/rc <会话名>'} />
+              <b>{t({ k: 'help.step3Title' })}</b>
+              <p>{t({ k: 'help.step3Body' })}</p>
+              <Cmd text={t({ k: 'help.rcCmd' })} />
             </li>
           </ol>
           <p className="help-note">
-            手机不能替你在机器上拉起 claude —— 会话必须从终端开始。终端关掉后会话显示离线，转录仍然留着。
+            {t({ k: 'help.note' })}
           </p>
         </div>
       </div>
@@ -193,6 +225,7 @@ export function ConfirmBody({ title, body, confirmLabel, onConfirm, onDismiss }:
   onConfirm: () => void;
   onDismiss: () => void;
 }) {
+  const t = useT();
   return (
     <div className="sheet-pad">
       <div className="confirm-head">
@@ -201,7 +234,7 @@ export function ConfirmBody({ title, body, confirmLabel, onConfirm, onDismiss }:
       </div>
       <div className="perm-actions">
         <button className="btn tall danger" onClick={() => { haptic('medium'); onConfirm(); }}>{confirmLabel}</button>
-        <button className="btn tall" onClick={onDismiss}>取消</button>
+        <button className="btn tall" onClick={onDismiss}>{t({ k: 'confirm.cancel' })}</button>
       </div>
     </div>
   );

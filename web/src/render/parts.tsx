@@ -19,6 +19,8 @@ import type { ItemActions } from './contract.ts';
 import { toolDisplayName, toolArg, splitPath, argIsPath, resultLine, byteLabel, imageKindLabel } from '../tools.ts';
 import { Picture, WifiOff, Alert } from '../icons.tsx';
 import type { Connection } from '../ws.ts';
+import { t, type Msg } from '../i18n/index.ts';
+import { useT, useLocale } from '../i18n/react.ts';
 
 /** `src/routes/checkout/` dim + `handler.ts` bright — the filename is what you scan for. */
 export function PathArg({ p }: { p: string }) {
@@ -26,16 +28,22 @@ export function PathArg({ p }: { p: string }) {
   return <>{dir && <span className="dim">{dir}</span>}{base}</>;
 }
 
-/** One element to a screen reader: "Bash, npm test, failed, double-tap to see the output". */
-export function toolRowLabel(call: ToolCall, openable: boolean, openHint: string): string {
+/**
+ * One element to a screen reader: "Bash, npm test, failed, double-tap to see the output".
+ *
+ * A plain function, not a component, so it takes the bare module `t` rather than the hook. That is
+ * safe here because it is called during its caller's render — the caller is what re-subscribes.
+ */
+export function toolRowLabel(call: ToolCall, openable: boolean, openHint: Msg): string {
   const label = toolDisplayName(call.name);
   const arg = toolArg(call.name, call.input);
   const res = resultLine(call);
-  return `${label}${arg ? `, ${arg}` : ''}, ${res?.text ?? ''}${openable ? openHint : ''}`;
+  return `${label}${arg ? `, ${arg}` : ''}, ${res ? t(res.text) : ''}${openable ? t(openHint) : ''}`;
 }
 
 /** Everything inside a tool row's button. */
 export function ToolRowBody({ call }: { call: ToolCall }) {
+  const t = useT();
   const label = toolDisplayName(call.name);
   const arg = toolArg(call.name, call.input);
   const res = resultLine(call);
@@ -49,7 +57,7 @@ export function ToolRowBody({ call }: { call: ToolCall }) {
         {res?.delta && <>{' '}<span className="delta"><span className="add">+{res.delta.add}</span> <span className="del">−{res.delta.del}</span></span></>}
       </div>
       {res && !res.delta && (
-        <div className={`tool-result-line${res.isError ? ' err' : ''}`}>{res.text}</div>
+        <div className={`tool-result-line${res.isError ? ' err' : ''}`}>{t(res.text)}</div>
       )}
     </>
   );
@@ -70,30 +78,31 @@ export function ImageStrip({ images, h }: { images: ImageAttachment[]; h: ItemAc
 }
 
 function ImageAttachmentView({ att, url }: { att: ImageAttachment; url: string | undefined }) {
+  const t = useT();
   // Data already in hand renders straight away; a reference waits for a tap.
   const [show, setShow] = useState(!!att.dataUrl);
   const [failed, setFailed] = useState(false);
-  const kind = imageKindLabel(att.mediaType);
+  const kind = t(imageKindLabel(att.mediaType));
   const size = byteLabel(att.bytes);
   const caption = [kind, size].filter(Boolean).join(' · ');
 
-  if (!url) return <div className="img-att gone">图片已不可用</div>;
-  if (failed) return <div className="img-att gone">图片加载失败 · {caption}</div>;
+  if (!url) return <div className="img-att gone">{t({ k: 'image.unavailable' })}</div>;
+  if (failed) return <div className="img-att gone">{t({ k: 'image.loadFailed', p: { caption } })}</div>;
   if (!show) {
     return (
-      <button className="img-att" onClick={() => setShow(true)} aria-label={`加载图片，${caption}`}>
+      <button className="img-att" onClick={() => setShow(true)} aria-label={t({ k: 'a11y.loadImage', p: { caption } })}>
         {/* An SVG, not an emoji: the self-hosted fonts carry no emoji glyphs, so 🖼 renders as
             tofu wherever the system font does not supply one. */}
         <span className="img-icon" aria-hidden="true"><Picture size={14} /></span>
         <span className="img-meta">{caption}</span>
-        <span className="img-cta">点击加载</span>
+        <span className="img-cta">{t({ k: 'image.tapToLoad' })}</span>
       </button>
     );
   }
   // A new tab is the image viewer: pinch-zoom, save, and full resolution come for free.
   return (
     <a className="img-att-shown" href={url} target="_blank" rel="noreferrer">
-      <img src={url} alt={`工具返回的图片 · ${caption}`} onError={() => setFailed(true)} />
+      <img src={url} alt={t({ k: 'a11y.toolImage', p: { caption } })} onError={() => setFailed(true)} />
     </a>
   );
 }
@@ -116,6 +125,9 @@ export function ActivityLine({ running, thinking, tokens, compacting }: {
   tokens?: number;
   compacting?: boolean;
 }) {
+  // Subscribes so the announcement below re-renders in the new language; `activityLabel` is a
+  // plain function and uses the bare `t`, so this component is what has to be listening.
+  useLocale();
   return (
     <div className="activity">
       <StarSpinner />
@@ -134,16 +146,17 @@ function activityLabel({ running, thinking, tokens, compacting }: {
   // First, because it is the one state that explains a multi-minute stall: while the worker
   // compacts, no tool is open and the model is not reasoning, so every other branch here would
   // either say nothing useful or describe something that already finished.
-  if (compacting) return '正在压缩上下文…';
+  if (compacting) return t({ k: 'activity.compacting' });
   if (running) {
     const s = Math.max(0, Math.round((Date.now() - running.since) / 1000));
     const dur = s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
     const arg = running.arg ? ` · ${running.arg.split('\n')[0].slice(0, 40)}` : '';
+    // Tool name, argument and duration are all verbatim — nothing here is ours to word.
     return `${toolDisplayName(running.name)}${arg} · ${dur}`;
   }
-  if (thinking) return tokens ? `思考中 · ${tokens} tokens` : '思考中';
+  if (thinking) return tokens ? t({ k: 'activity.thinkingTokens', p: { tokens } }) : t({ k: 'activity.thinking' });
   // Working, but neither reasoning nor inside a tool — streaming prose, or between steps.
-  return '运行中';
+  return t({ k: 'activity.running' });
 }
 
 /** The CLI's own activity glyph: it grows to a full star and shrinks back, one frame at a time. */
@@ -174,13 +187,14 @@ function StarSpinner() {
 export function Banner({ connection, sessionOffline, machine, onRetry }: {
   connection: Connection; sessionOffline: boolean; machine?: string; onRetry: () => void;
 }) {
+  const t = useT();
   if (connection === 'connecting') {
     return (
       <div className="banner warning">
         <span className="spinner" />
         <div className="banner-text">
-          <div className="t1">重新连接中…</div>
-          <div className="t2">会话仍在 {machine || '你的机器'} 上继续运行</div>
+          <div className="t1">{t({ k: 'banner.reconnecting' })}</div>
+          <div className="t2">{t({ k: 'banner.stillRunningOn', p: { machine: machine || t({ k: 'banner.yourMachine' }) } })}</div>
         </div>
       </div>
     );
@@ -190,10 +204,10 @@ export function Banner({ connection, sessionOffline, machine, onRetry }: {
       <div className="banner danger">
         <WifiOff size={15} stroke="#e07a5f" />
         <div className="banner-text">
-          <div className="t1">已离线</div>
-          <div className="t2">恢复连接后会自动继续</div>
+          <div className="t1">{t({ k: 'banner.offline' })}</div>
+          <div className="t2">{t({ k: 'banner.resumeAuto' })}</div>
         </div>
-        <button className="link" style={{ color: 'var(--text)' }} onClick={onRetry}>重试</button>
+        <button className="link" style={{ color: 'var(--text)' }} onClick={onRetry}>{t({ k: 'banner.retry' })}</button>
       </div>
     );
   }
@@ -202,8 +216,8 @@ export function Banner({ connection, sessionOffline, machine, onRetry }: {
       <div className="banner neutral">
         <Alert size={15} stroke="#8a8781" />
         <div className="banner-text">
-          <div className="t1">{machine || '这台机器'} 上的 claude 没有连着</div>
-          <div className="t2">转录仍在，回到终端继续会话即可恢复</div>
+          <div className="t1">{t({ k: 'banner.notConnected', p: { machine: machine || t({ k: 'banner.thisMachine' }) } })}</div>
+          <div className="t2">{t({ k: 'banner.transcriptKept' })}</div>
         </div>
       </div>
     );

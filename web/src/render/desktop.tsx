@@ -19,6 +19,7 @@ import { phoneRenderers } from './phone.tsx';
 import { ToolRowBody, ImageStrip, toolRowLabel } from './parts.tsx';
 import { Modal, Popover } from '../components/desktop/Modal.tsx';
 import { PermissionBody, OutputBody, MenuBody, HelpBody, ConfirmBody } from './surface-parts.tsx';
+import { useT } from '../i18n/react.ts';
 
 export const desktopRenderers: ItemRenderers = {
   // Reviewed one by one: on a wider screen these read the same as they do on a phone.
@@ -52,7 +53,7 @@ function DesktopToolRow({ call, onOpen }: { call: ToolCall; onOpen: (c: ToolCall
       className="tool-row hoverable"
       onClick={() => openable && onOpen(call)}
       disabled={!openable}
-      aria-label={toolRowLabel(call, openable, '，点击查看输出')}
+      aria-label={toolRowLabel(call, openable, { k: 'a11y.openOutputDesktop' })}
     >
       <ToolRowBody call={call} />
     </button>
@@ -69,26 +70,40 @@ function DesktopToolRow({ call, onOpen }: { call: ToolCall; onOpen: (c: ToolCall
  * worker waiting on an answer that never comes.
  */
 export const desktopSurfaces: LiveSurfaces = {
-  permission: ({ req, cwd, onAnswer, onDismiss }) => (
-    <Modal onDismiss={onDismiss} label="需要你的批准" width={520}>
-      <PermissionBody req={req} cwd={cwd} onAnswer={onAnswer} />
-    </Modal>
-  ),
-  output: ({ call, onDismiss }) => (
-    <Modal onDismiss={onDismiss} label="工具输出" width={900} tall>
-      <OutputBody call={call} />
-    </Modal>
-  ),
-  menu: ({ meta, mode, onMode, onEnd, onDismiss }) => (
-    <Popover onDismiss={onDismiss} label="会话菜单">
-      <MenuBody meta={meta} mode={mode} onMode={onMode} onEnd={onEnd} onDismiss={onDismiss} />
-    </Popover>
-  ),
-  help: ({ onDismiss }) => (
-    <Modal onDismiss={onDismiss} label="怎么开一个会话" width={480}>
-      <HelpBody />
-    </Modal>
-  ),
+  // Block bodies rather than the concise arrows these used to be: each is a component in its own
+  // right, so each gets to call the hook and re-render when the language changes.
+  permission: ({ req, cwd, onAnswer, onDismiss }) => {
+    const t = useT();
+    return (
+      <Modal onDismiss={onDismiss} label={t({ k: 'perm.modalTitle' })} width={520}>
+        <PermissionBody req={req} cwd={cwd} onAnswer={onAnswer} />
+      </Modal>
+    );
+  },
+  output: ({ call, onDismiss }) => {
+    const t = useT();
+    return (
+      <Modal onDismiss={onDismiss} label={t({ k: 'output.modalTitle' })} width={900} tall>
+        <OutputBody call={call} />
+      </Modal>
+    );
+  },
+  menu: ({ meta, mode, onMode, onEnd, onDismiss }) => {
+    const t = useT();
+    return (
+      <Popover onDismiss={onDismiss} label={t({ k: 'menu.modalTitle' })}>
+        <MenuBody meta={meta} mode={mode} onMode={onMode} onEnd={onEnd} onDismiss={onDismiss} />
+      </Popover>
+    );
+  },
+  help: ({ onDismiss }) => {
+    const t = useT();
+    return (
+      <Modal onDismiss={onDismiss} label={t({ k: 'help.modalTitle' })} width={480}>
+        <HelpBody />
+      </Modal>
+    );
+  },
   confirm: ({ title, body, confirmLabel, onConfirm, onDismiss }) => (
     <Modal onDismiss={onDismiss} label={title} width={420}>
       <ConfirmBody title={title} body={body} confirmLabel={confirmLabel} onConfirm={onConfirm} onDismiss={onDismiss} />

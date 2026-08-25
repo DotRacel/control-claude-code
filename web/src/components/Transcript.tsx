@@ -13,6 +13,7 @@
 import { memo } from 'react';
 import type { Item } from '../model.ts';
 import type { ItemActions, ItemProps, ItemRenderers } from '../render/contract.ts';
+import { useLocale } from '../i18n/react.ts';
 
 export type { ItemActions, ItemRenderers } from '../render/contract.ts';
 
@@ -22,6 +23,15 @@ export const ItemView = memo(function ItemView({ it, isLast, h, renderers }: {
   h: ItemActions;
   renderers: ItemRenderers;
 }) {
+  // THIS is the memo boundary for the whole transcript, and a locale change does not touch any of
+  // the four props above — so without a subscription right here, switching language would leave
+  // every item already on screen in the old one while the chrome around it changed. Reading the
+  // store subscribes this component, which is the one thing `memo` cannot block.
+  //
+  // It also buys the renderers below it their freedom: everything under this point re-renders when
+  // this does, so render/phone.tsx and render/desktop.tsx can call the bare module `t` instead of
+  // threading a hook through eight presentational components.
+  useLocale();
   // The map is exhaustive by construction, but its value type is a union of per-kind components
   // once indexed by a union key, and TypeScript cannot see that this `it` matches this component.
   // The cast is confined to this one line, which is the trade for having the check happen where it

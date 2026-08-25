@@ -1,5 +1,8 @@
 <!doctype html>
-<html lang="zh">
+<!-- lang="en" is the FALLBACK, not a claim about this reader: it is what a crawler and the ~0ms
+     before React mounts see, and it matches the last resort of the app's own detection. The real
+     locale is written onto this element as soon as web/src/i18n/index.ts is evaluated. -->
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
@@ -10,7 +13,9 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Claude Remote" />
     <meta name="application-name" content="Claude Remote" />
-    <meta name="description" content="在手机上遥控本机 Claude Code 会话" />
+    <!-- English for the same reason as `lang` above: this serves crawlers and link previews, so it
+         cannot vary per reader the way the UI does. -->
+    <meta name="description" content="Drive a Claude Code session on your own machine, from your phone" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <!-- The symbol itself is a transparent SVG, so it is the tab icon directly: it stays sharp at
          any tab-strip density, and browsers that cannot use it fall through to the PNG below. -->

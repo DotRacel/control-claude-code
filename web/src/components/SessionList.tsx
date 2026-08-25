@@ -15,6 +15,8 @@ import { toolDisplayName } from '../tools.ts';
 import { Lock, Check, Help, SignOut } from '../icons.tsx';
 import { HelpSheet, ConfirmSheet } from './Sheets.tsx';
 import { notifyPermission, requestNotifyPermission } from '../notify.ts';
+import { t } from '../i18n/index.ts';
+import { useT } from '../i18n/react.ts';
 
 export type Filter = 'active' | 'all';
 
@@ -22,12 +24,14 @@ export type Filter = 'active' | 'all';
 export const filterSessions = (sessions: SessionView[], f: Filter): SessionView[] =>
   sessions.filter((s) => (f === 'active' ? s.status === 'active' : true));
 
-function relTime(ts: number): string {
+/** Exported so the sidebar reads the same clock; a plain function, so it uses the bare `t` and
+ * relies on its calling component being subscribed. */
+export function relTime(ts: number): string {
   const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
-  if (s < 45) return '刚刚';
-  if (s < 3600) return `${Math.round(s / 60)} 分钟前`;
-  if (s < 86400) return `${Math.round(s / 3600)} 小时前`;
-  return `${Math.round(s / 86400)} 天前`;
+  if (s < 45) return t({ k: 'time.justNow' });
+  if (s < 3600) return t({ k: 'time.minutesAgo', p: { n: Math.round(s / 60) } });
+  if (s < 86400) return t({ k: 'time.hoursAgo', p: { n: Math.round(s / 3600) } });
+  return t({ k: 'time.daysAgo', p: { n: Math.round(s / 86400) } });
 }
 
 function elapsed(since: number): string {
@@ -42,6 +46,7 @@ export function SessionList({ sessions, connection, onOpen, onLogout }: {
   onOpen: (s: SessionView) => void;
   onLogout: () => void;
 }) {
+  const t = useT();
   const [filter, setFilter] = useState<Filter>('active');
   const [perm, setPerm] = useState(notifyPermission());
   const [help, setHelp] = useState(false);
@@ -61,29 +66,31 @@ export function SessionList({ sessions, connection, onOpen, onLogout }: {
   return (
     <div className="screen">
       <div className="topbar-lg">
-        <h1>会话</h1>
+        <h1>{t({ k: 'list.title' })}</h1>
         <div style={{ display: 'flex', gap: 10 }}>
-          <button className="icon-btn" aria-label="帮助" onClick={() => setHelp(true)}><Help size={17} /></button>
-          <button className="icon-btn" aria-label="退出登录" onClick={() => setConfirmLogout(true)}><SignOut size={17} /></button>
+          {/* data-testid, because test/ui-shot.ts drives these two and an aria-label that changes
+              with the language is not something a screenshot script can hold on to. */}
+          <button className="icon-btn" data-testid="help" aria-label={t({ k: 'a11y.help' })} onClick={() => setHelp(true)}><Help size={17} /></button>
+          <button className="icon-btn" data-testid="logout" aria-label={t({ k: 'a11y.logout' })} onClick={() => setConfirmLogout(true)}><SignOut size={17} /></button>
         </div>
       </div>
       <div className="chips">
         {(['active', 'all'] as Filter[]).map((f) => (
           <button key={f} className={`chip${filter === f ? ' on' : ''}`} onClick={() => setFilter(f)}>
-            {f === 'active' ? '活跃' : '全部'}
+            {t({ k: f === 'active' ? 'list.filterActive' : 'list.filterAll' })}
           </button>
         ))}
       </div>
       {perm === 'default' && (
         <button className="notify-banner" onClick={async () => { await requestNotifyPermission(); setPerm(notifyPermission()); }}>
-          需要审批时通知我
+          {t({ k: 'list.notifyOnApproval' })}
         </button>
       )}
       <div className="scroll">
         <div className="session-list">
           {shown.length === 0 && (
             <div className="empty">
-              {connection === 'online' ? '还没有会话。点右上角的 ? 看怎么开一个。' : '正在连接…'}
+              {t({ k: connection === 'online' ? 'list.emptyPhone' : 'list.connecting' })}
             </div>
           )}
           {shown.map((s) => <SessionCard key={s.id} s={s} onOpen={onOpen} />)}
@@ -92,9 +99,9 @@ export function SessionList({ sessions, connection, onOpen, onLogout }: {
       {help && <HelpSheet onDismiss={() => setHelp(false)} />}
       {confirmLogout && (
         <ConfirmSheet
-          title="退出登录？"
-          body="这台设备会忘掉密钥，下次要重新登录。电脑上的会话不受影响，继续跑。"
-          confirmLabel="退出登录"
+          title={t({ k: 'list.logoutTitle' })}
+          body={t({ k: 'list.logoutBody' })}
+          confirmLabel={t({ k: 'a11y.logout' })}
           onConfirm={onLogout}
           onDismiss={() => setConfirmLogout(false)}
         />
@@ -104,6 +111,7 @@ export function SessionList({ sessions, connection, onOpen, onLogout }: {
 }
 
 export function SessionCard({ s, onOpen, active }: { s: SessionView; onOpen: (s: SessionView) => void; active?: boolean }) {
+  const t = useT();
   const d = s.digest ?? ({ toolCalls: 0, pendingApproval: false, turnActive: false } as SessionView['digest']);
   const running = d.toolStatus === 'running' && s.status === 'active';
   const attention = d.pendingApproval;
@@ -114,9 +122,9 @@ export function SessionCard({ s, onOpen, active }: { s: SessionView; onOpen: (s:
       onClick={() => onOpen(s)}
     >
       <div className="session-top">
-        <span className="session-name ellipsis">{s.machine || '未知设备'}</span>
+        <span className="session-name ellipsis">{s.machine || t({ k: 'list.unknownDevice' })}</span>
         {attention
-          ? <span className="badge-approval"><Lock size={11} stroke="#e5895f" />需要审批</span>
+          ? <span className="badge-approval"><Lock size={11} stroke="#e5895f" />{t({ k: 'list.needsApproval' })}</span>
           : <span className="session-when">{relTime(s.lastActivity)}</span>}
       </div>
       {d.prompt && <div className="session-prompt">{d.prompt}</div>}
@@ -128,9 +136,9 @@ export function SessionCard({ s, onOpen, active }: { s: SessionView; onOpen: (s:
             {d.toolStartedAt ? ` · ${elapsed(d.toolStartedAt)}` : ''}
           </>
         ) : d.toolCalls > 0 ? (
-          <><Check size={12} stroke="#8a8781" />完成 · {d.toolCalls} 次工具调用</>
+          <><Check size={12} stroke="#8a8781" />{t({ k: d.toolCalls === 1 ? 'list.doneWithToolsOne' : 'list.doneWithToolsMany', p: { n: d.toolCalls } })}</>
         ) : (
-          <><span className={`dot ${s.status === 'active' ? 'on' : 'off'}`} />{s.status === 'active' ? '在线' : '离线'}{s.dir ? ` · ${s.dir}` : ''}</>
+          <><span className={`dot ${s.status === 'active' ? 'on' : 'off'}`} />{t({ k: s.status === 'active' ? 'list.online' : 'list.offline' })}{s.dir ? ` · ${s.dir}` : ''}</>
         )}
       </div>
     </button>
@@ -151,16 +159,17 @@ export function SessionCard({ s, onOpen, active }: { s: SessionView; onOpen: (s:
  * because the label is still there, just not spending a line.
  */
 export function SessionRow({ s, onOpen, active }: { s: SessionView; onOpen: (s: SessionView) => void; active?: boolean }) {
+  const t = useT();
   const d = s.digest ?? ({ toolCalls: 0, pendingApproval: false, turnActive: false } as SessionView['digest']);
   const running = d.toolStatus === 'running' && s.status === 'active';
   // One dot for four states, most urgent first: an approval outranks a running tool, which
   // outranks merely being online.
   const [state, label] = d.pendingApproval
-    ? ['wait', '需要审批']
+    ? ['wait', t({ k: 'list.needsApproval' })]
     : running
-      ? ['run', `运行中 · ${toolDisplayName(d.tool!)}`]
-      : s.status === 'active' ? ['on', '在线'] : ['off', '离线'];
-  const name = s.machine || '未知设备';
+      ? ['run', t({ k: 'list.runningTool', p: { tool: toolDisplayName(d.tool!) } })]
+      : s.status === 'active' ? ['on', t({ k: 'list.online' })] : ['off', t({ k: 'list.offline' })];
+  const name = s.machine || t({ k: 'list.unknownDevice' });
 
   return (
     <button

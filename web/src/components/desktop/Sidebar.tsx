@@ -18,6 +18,7 @@ import { SessionRow, type Filter } from '../SessionList.tsx';
 import { desktopSurfaces } from '../../render/desktop.tsx';
 import { Help, SignOut } from '../../icons.tsx';
 import { notifyPermission, requestNotifyPermission } from '../../notify.ts';
+import { useT } from '../../i18n/react.ts';
 
 export function Sidebar({ shown, activeId, connection, filter, onFilter, onOpen, onLogout }: {
   /** Already filtered by DesktopShell, in render order. */
@@ -29,6 +30,7 @@ export function Sidebar({ shown, activeId, connection, filter, onFilter, onOpen,
   onOpen: (s: SessionView) => void;
   onLogout: () => void;
 }) {
+  const t = useT();
   const [perm, setPerm] = useState(notifyPermission());
   const [help, setHelp] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
@@ -37,8 +39,9 @@ export function Sidebar({ shown, activeId, connection, filter, onFilter, onOpen,
   // Keep "3 分钟前" honest. Every 30s, not every second: the rows no longer show a running tool's
   // stopwatch, and the coarsest thing on screen is a whole minute.
   useEffect(() => {
-    const t = setInterval(() => tick((n) => n + 1), 30_000);
-    return () => clearInterval(t);
+    // `id`, not `t` — that name is the translator now.
+    const id = setInterval(() => tick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
   }, []);
 
   const Help_ = desktopSurfaces.help;
@@ -47,29 +50,31 @@ export function Sidebar({ shown, activeId, connection, filter, onFilter, onOpen,
   return (
     <aside className="sidebar">
       <div className="sidebar-head">
-        <h1>会话</h1>
+        <h1>{t({ k: 'list.title' })}</h1>
         <div className="sidebar-tools">
-          <button className="icon-btn" aria-label="帮助" onClick={() => setHelp(true)}><Help size={16} /></button>
-          <button className="icon-btn" aria-label="退出登录" onClick={() => setConfirmLogout(true)}><SignOut size={16} /></button>
+          {/* Same data-testid as the phone's pair in SessionList.tsx: ui-shot drives whichever of
+              the two is on screen for the device it is shooting. */}
+          <button className="icon-btn" data-testid="help" aria-label={t({ k: 'a11y.help' })} onClick={() => setHelp(true)}><Help size={16} /></button>
+          <button className="icon-btn" data-testid="logout" aria-label={t({ k: 'a11y.logout' })} onClick={() => setConfirmLogout(true)}><SignOut size={16} /></button>
         </div>
       </div>
       <div className="chips">
         {(['active', 'all'] as Filter[]).map((f) => (
           <button key={f} className={`chip${filter === f ? ' on' : ''}`} onClick={() => onFilter(f)}>
-            {f === 'active' ? '活跃' : '全部'}
+            {t({ k: f === 'active' ? 'list.filterActive' : 'list.filterAll' })}
           </button>
         ))}
       </div>
       {perm === 'default' && (
         <button className="notify-banner" onClick={async () => { await requestNotifyPermission(); setPerm(notifyPermission()); }}>
-          需要审批时通知我
+          {t({ k: 'list.notifyOnApproval' })}
         </button>
       )}
       <div className="sidebar-scroll">
         <div className="session-list">
           {shown.length === 0 && (
             <div className="empty">
-              {connection === 'online' ? '还没有会话。点上面的 ? 看怎么开一个。' : '正在连接…'}
+              {t({ k: connection === 'online' ? 'list.emptySidebar' : 'list.connecting' })}
             </div>
           )}
           {shown.map((s) => <SessionRow key={s.id} s={s} onOpen={onOpen} active={s.id === activeId} />)}
@@ -77,10 +82,12 @@ export function Sidebar({ shown, activeId, connection, filter, onFilter, onOpen,
       </div>
       {help && <Help_ onDismiss={() => setHelp(false)} />}
       {confirmLogout && (
+        /* One key set with the phone's confirm in SessionList.tsx — this copy used to be
+           duplicated verbatim in both files, so a wording change meant two edits. */
         <Confirm
-          title="退出登录？"
-          body="这台设备会忘掉密钥，下次要重新登录。电脑上的会话不受影响，继续跑。"
-          confirmLabel="退出登录"
+          title={t({ k: 'list.logoutTitle' })}
+          body={t({ k: 'list.logoutBody' })}
+          confirmLabel={t({ k: 'a11y.logout' })}
           onConfirm={onLogout}
           onDismiss={() => setConfirmLogout(false)}
         />

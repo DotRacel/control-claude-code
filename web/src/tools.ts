@@ -9,6 +9,7 @@
  */
 import { toolDisplayName, toolArg, splitPath, argIsPath, HIDDEN_TOOLS, QUESTION_TOOL } from '../../src/tool-summary.ts';
 import type { ToolCall } from './model.ts';
+import type { Msg } from './i18n/msg.ts';
 
 export { toolDisplayName, toolArg, splitPath, argIsPath, HIDDEN_TOOLS, QUESTION_TOOL };
 
@@ -35,11 +36,12 @@ export function byteLabel(n: number | undefined): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/** `PNG` — the type shown on the placeholder, from the block's media type. */
-export function imageKindLabel(mediaType: string | undefined): string {
-  if (!mediaType) return '图片';
+/** `PNG` — the type shown on the placeholder, from the block's media type. The media subtype is a
+ * literal and stays one; only the "we could not tell" fallback needs a language. */
+export function imageKindLabel(mediaType: string | undefined): Msg {
+  if (!mediaType) return { k: 'image.generic' };
   const sub = mediaType.split('/')[1] ?? '';
-  return sub ? sub.replace('+xml', '').toUpperCase() : '图片';
+  return sub ? sub.replace('+xml', '').toUpperCase() : { k: 'image.generic' };
 }
 
 /** Where the bytes of a stripped image live. Built here so the components stay presentational. */
@@ -57,45 +59,54 @@ export function durationLabel(ms: number | undefined): string | null {
 }
 
 /** `text` is always the plain reading of the line (it is also the card's accessible name); `delta`
- * is set alongside it when the two counts should render as coloured spans instead. */
-export interface ResultLine { text: string; isError?: boolean; delta?: { add: number; del: number } }
+ * is set alongside it when the two counts should render as coloured spans instead.
+ *
+ * `text` is a `Msg`, not a string, for the same reason the reducer's is: this function is called
+ * from Node by test/render-history.ts and from both platform renderers, none of which agree on a
+ * language. A bare string in there is final text off the wire (a tool's own error line, an Edit's
+ * `+6 −2`); an object is a catalog key. */
+export interface ResultLine { text: Msg; isError?: boolean; delta?: { add: number; del: number } }
 
 /** The single line a collapsed tool card shows. Status is present tense, lowercase after the
  * first word (design copy rule): "Running…", not "RUNNING". */
 export function resultLine(call: ToolCall): ResultLine | null {
-  if (call.status === 'running') return { text: 'Running…' };
-  if (call.status === 'awaiting') return { text: '等待你允许…' };
+  if (call.status === 'running') return { text: { k: 'tool.running' } };
+  if (call.status === 'awaiting') return { text: { k: 'tool.awaiting' } };
 
   const out = call.result ?? '';
   if (call.status === 'error') {
-    return { text: firstLine(out) || '失败', isError: true };
+    // The tool's own first line when it produced one — that text came off the wire and is never
+    // translated; only the "we got nothing" fallback is ours to word.
+    return { text: firstLine(out) || { k: 'tool.failed' }, isError: true };
   }
   // An image-only result (a `Read` of a screenshot) has no text to count lines of; the images
   // themselves render under the row, so the line just says what arrived.
   const images = call.images?.length ?? 0;
-  if (images && !out.trim()) return { text: images > 1 ? `${images} 张图片` : '图片' };
+  if (images && !out.trim()) {
+    return { text: images > 1 ? { k: 'tool.imageMany', p: { n: images } } : { k: 'tool.imageOne' } };
+  }
   switch (call.name) {
     case 'Read': {
       const n = countLines(out);
-      return { text: n ? `读了 ${n} 行` : '完成' };
+      return { text: n ? { k: n === 1 ? 'tool.readOne' : 'tool.readMany', p: { n } } : { k: 'tool.done' } };
     }
     case 'Edit':
     case 'NotebookEdit': {
       const d = editDelta(call.input);
-      return d ? { text: `+${d.add} −${d.del}`, delta: d } : { text: '已修改' };
+      return d ? { text: `+${d.add} −${d.del}`, delta: d } : { text: { k: 'tool.modified' } };
     }
     case 'Write': {
       const n = typeof call.input?.content === 'string' ? call.input.content.split('\n').length : 0;
-      return { text: n ? `写入 ${n} 行` : '已写入' };
+      return { text: n ? { k: n === 1 ? 'tool.wroteOne' : 'tool.wroteMany', p: { n } } : { k: 'tool.written' } };
     }
     case 'Grep':
     case 'Glob': {
       const n = countLines(out);
-      return { text: n ? `${n} 处结果` : '无匹配' };
+      return { text: n ? { k: n === 1 ? 'tool.matchOne' : 'tool.matchMany', p: { n } } : { k: 'tool.noMatch' } };
     }
     default: {
       const l = firstLine(out);
-      return { text: l || '完成' };
+      return { text: l || { k: 'tool.done' } };
     }
   }
 }

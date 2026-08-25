@@ -23,6 +23,9 @@ import { durationLabel } from '../tools.ts';
 import { renderMarkdown } from '../md.ts';
 import { haptic } from '../haptics.ts';
 import { Check, Alert, Brain, ClaudeMark } from '../icons.tsx';
+// The bare `t`, not the hook: everything in this file renders under ItemView, which subscribes to
+// the locale on behalf of all of it (see the note in components/Transcript.tsx).
+import { t } from '../i18n/index.ts';
 
 const LONG_PRESS_MS = 400;
 /**
@@ -68,15 +71,15 @@ export const phoneRenderers: ItemRenderers = {
 
   bgtask: ({ it, isLast }) => <BgTaskCard it={it} cls={enterClass(isLast)} />,
 
-  status: ({ it, isLast }) => <div className={`status-line ${enterClass(isLast) ?? ''}`}>{it.text}</div>,
+  status: ({ it, isLast }) => <div className={`status-line ${enterClass(isLast) ?? ''}`}>{t(it.text)}</div>,
 
   // /clear, a compaction, or the worker going away: the turns above it belong to a conversation
   // that no longer exists, so the break has to be visible.
-  divider: ({ it, isLast }) => <div className={`divider ${enterClass(isLast) ?? ''}`}><span>{it.label}</span></div>,
+  divider: ({ it, isLast }) => <div className={`divider ${enterClass(isLast) ?? ''}`}><span>{t(it.label)}</span></div>,
 
   error: ({ it, isLast }) => (
     <div className={`error-card ${enterClass(isLast) ?? ''}`}>
-      <div className="t1"><Alert size={14} /> {it.title}</div>
+      <div className="t1"><Alert size={14} /> {t(it.title)}</div>
       {it.detail && <div className="t2">{it.detail}</div>}
     </div>
   ),
@@ -92,8 +95,8 @@ export const phoneRenderers: ItemRenderers = {
  */
 function UnknownChip({ it, cls }: { it: Extract<Item, { kind: 'unknown' }>; cls?: string }) {
   return (
-    <div className={`unknown-chip ${cls ?? ''}`} title="这条消息的格式还没有适配">
-      ⋯ 未适配消息 · {it.shape}{it.count > 1 ? ` ×${it.count}` : ''}
+    <div className={`unknown-chip ${cls ?? ''}`} title={t({ k: 'unknown.title' })}>
+      ⋯ {t({ k: 'unknown.chip' })} · {it.shape}{it.count > 1 ? ` ×${it.count}` : ''}
     </div>
   );
 }
@@ -110,7 +113,7 @@ function ThinkingView({ it, cls }: { it: Extract<Item, { kind: 'thinking' }>; cl
     <div className={`thinking ${cls ?? ''}`}>
       <button className="thinking-head" onClick={() => setOpen(!open)}>
         <Brain size={14} />
-        思考 · {open ? '收起' : '展开'}
+        {t({ k: 'thinking.label' })} · {open ? t({ k: 'thinking.collapse' }) : t({ k: 'thinking.expand' })}
       </button>
       {open && <div className="thinking-body">{it.text}</div>}
     </div>
@@ -124,17 +127,20 @@ function ThinkingView({ it, cls }: { it: Extract<Item, { kind: 'thinking' }>; cl
  */
 function BgTaskCard({ it, cls }: { it: Extract<Item, { kind: 'bgtask' }>; cls?: string }) {
   const running = it.status === 'running';
-  const state = running ? 'running…'
-    : it.status === 'failed' ? '失败'
-    : it.status === 'interrupted' ? '已中断'   // the worker went away mid-task
-    : '完成';
-  const bits = [state, durationLabel(it.ms), it.tools ? `${it.tools} 次工具` : null].filter(Boolean);
+  const state = running ? t({ k: 'bgtask.running' })
+    : it.status === 'failed' ? t({ k: 'bgtask.failed' })
+    : it.status === 'interrupted' ? t({ k: 'bgtask.interrupted' })   // the worker went away mid-task
+    : t({ k: 'bgtask.done' });
+  const tools = it.tools
+    ? t({ k: it.tools === 1 ? 'tool.toolCountOne' : 'tool.toolCountMany', p: { n: it.tools } })
+    : null;
+  const bits = [state, durationLabel(it.ms), tools].filter(Boolean);
   return (
     <div className={`bgtask${it.status === 'failed' ? ' failed' : ''} ${cls ?? ''}`}>
       <span className={`dot ${running ? 'run' : it.status === 'completed' ? 'on' : 'off'}`} />
       <div className="bgtask-text">
-        <div className="t1">{it.description}</div>
-        <div className="t2">后台任务 · {bits.join(' · ')}</div>
+        <div className="t1">{t(it.description)}</div>
+        <div className="t2">{t({ k: 'bgtask.label' })} · {bits.join(' · ')}</div>
         {/* Where it got to. Dropped once a task completes (the step it ended on says nothing then),
             but kept for one that failed or was interrupted — that IS the useful part. */}
         {it.status !== 'completed' && it.detail && <div className="t3">{it.detail}</div>}
@@ -218,7 +224,7 @@ function ToolRow({ call, onOpen }: { call: ToolCall; onOpen: (c: ToolCall) => vo
       onMouseUp={() => { if (!touched.current) end(true); }}
       onMouseLeave={() => { if (!touched.current) end(false); }}
       disabled={!openable}
-      aria-label={toolRowLabel(call, openable, '，双击查看输出')}
+      aria-label={toolRowLabel(call, openable, { k: 'a11y.openOutputPhone' })}
     >
       <ToolRowBody call={call} />
     </button>
@@ -229,12 +235,13 @@ function ToolRow({ call, onOpen }: { call: ToolCall; onOpen: (c: ToolCall) => vo
 function TodoCard({ tasks, cls }: { tasks: TodoTask[]; cls?: string }) {
   return (
     <div className={`tool-group ${cls ?? ''}`}>
-      <div className="tool-head">任务清单</div>
+      <div className="tool-head">{t({ k: 'tool.todoList' })}</div>
       <div className="todo-list">
-        {tasks.map((t) => (
-          <div key={t.key} className={`todo-item ${t.status === 'completed' ? 'done' : t.status === 'in_progress' ? 'active' : ''}`}>
-            <span className="todo-box">{t.status === 'completed' && <Check size={11} stroke="#1f1e1c" />}</span>
-            <span>{t.subject}</span>
+        {/* `task`, not `t` — the old name now shadows the translator. */}
+        {tasks.map((task) => (
+          <div key={task.key} className={`todo-item ${task.status === 'completed' ? 'done' : task.status === 'in_progress' ? 'active' : ''}`}>
+            <span className="todo-box">{task.status === 'completed' && <Check size={11} stroke="#1f1e1c" />}</span>
+            <span>{t(task.subject)}</span>
           </div>
         ))}
       </div>
@@ -280,7 +287,7 @@ function QuestionCard({ it, cls, onAnswer }: {
 
   return (
     <div className={`qcard${answered ? ' answered' : ''} ${cls ?? ''}`}>
-      <div className="qcard-head"><ClaudeMark size={15} fill="#d97757" /><span className="t1">Claude 想问你</span></div>
+      <div className="qcard-head"><ClaudeMark size={15} fill="#d97757" /><span className="t1">{t({ k: 'question.claudeAsks' })}</span></div>
       {it.questions.map((q, qi) => (
         <div className="qblock" key={qi}>
           {q.header && <span className="qchip">{q.header}</span>}
@@ -302,18 +309,18 @@ function QuestionCard({ it, cls, onAnswer }: {
         </div>
       ))}
       {answered
-        ? <div className="qanswer">{it.answered!.trim() || '已回答'}</div>
+        ? <div className="qanswer">{t(it.answered!).trim() || t({ k: 'question.answered' })}</div>
         : (
           <>
             <div className="qblock" style={{ paddingTop: 0 }}>
               <input
-                className="qother" placeholder="或者直接写点别的…" value={freeform}
+                className="qother" placeholder={t({ k: 'question.freeform' })} value={freeform}
                 onChange={(e) => setFreeform(e.target.value)}
               />
             </div>
             <div className="qactions">
-              <button className="btn" onClick={() => { haptic('medium'); submit(true); }}>跳过</button>
-              <button className="btn primary" style={{ flex: 1 }} disabled={!complete} onClick={() => { haptic('light'); submit(false); }}>提交</button>
+              <button className="btn" onClick={() => { haptic('medium'); submit(true); }}>{t({ k: 'question.skip' })}</button>
+              <button className="btn primary" style={{ flex: 1 }} disabled={!complete} onClick={() => { haptic('light'); submit(false); }}>{t({ k: 'question.submit' })}</button>
             </div>
           </>
         )}

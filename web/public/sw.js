@@ -1,6 +1,9 @@
 /* Claude Remote shell worker. Never intercepts /v1 or /ws. */
 // Bump on every deploy that must not be served from an old cache.
-const CACHE = 'ccc-web-v9';
+// v10: manifest.webmanifest changed language (zh → en). It is precached AND served cache-first
+// below, unlike index.html which is network-first and self-heals — so without this bump an
+// already-installed app would keep the old manifest forever.
+const CACHE = 'ccc-web-v10';
 const PRECACHE = [
   './',
   './index.html',

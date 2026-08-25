@@ -22,6 +22,8 @@ import {
 import type { ItemActions } from './render/contract.ts';
 import { toolDisplayName, blobUrl } from './tools.ts';
 import { showPushNotification } from './notify.ts';
+import type { Msg } from './i18n/msg.ts';
+import { useT } from './i18n/react.ts';
 
 /** Within this many pixels of the bottom, new items keep scrolling into view (0c). */
 const PIN_PX = 120;
@@ -54,8 +56,12 @@ export function useSession({ session, sock, connection, registerEvent, registerH
   registerEvent: (cb: (sid: string, p: any) => void) => void;
   registerHistory: (cb: (sid: string, events: any[]) => void) => void;
 }): SessionController {
+  const t = useT();
   const [state, setState] = useState<TranscriptState>(() => initialState());
   const [output, setOutput] = useState<ToolCall | null>(null);
+  // Stays a plain string, not a Msg: an aria-live announcement is a one-shot that a screen reader
+  // reads once and the next turn replaces. Threading a Msg through SessionController and both
+  // chat views to re-word a sentence nobody is still listening to would buy nothing.
   const [announce, setAnnounce] = useState('');
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -94,14 +100,14 @@ export function useSession({ session, sock, connection, registerEvent, registerH
   const permissionId = state.live.permission?.requestId;
   useEffect(() => {
     if (!permissionId) return;
-    setAnnounce('需要审批');
+    setAnnounce(t({ k: 'announce.needsApproval' }));
     if (document.visibilityState !== 'visible') {
-      showPushNotification(`${toolDisplayName(stateRef.current.live.permission!.toolName)} 需要你的批准`, { force: true });
+      showPushNotification(t({ k: 'push.needsApproval', p: { tool: toolDisplayName(stateRef.current.live.permission!.toolName) } }), { force: true });
     }
   }, [permissionId]);
 
   const busy = state.live.busy;
-  useEffect(() => { if (!busy) setAnnounce('回合完成'); }, [busy]);
+  useEffect(() => { if (!busy) setAnnounce(t({ k: 'announce.turnDone' })); }, [busy]);
 
   const offline = connection !== 'online' || session.status !== 'active';
 
@@ -111,7 +117,10 @@ export function useSession({ session, sock, connection, registerEvent, registerH
       const updatedInput: Record<string, unknown> = { questions: item.questions, answers };
       if (freeform) updatedInput.response = freeform;
       sock.respondPermission(session.id, item.requestId, { behavior: 'allow', updatedInput });
-      const summary = Object.entries(answers).map(([q, a]) => `${q} → ${a}`).join('\n') || (freeform ?? '已跳过');
+      // The answers are the reader's own words, so they are wire text; only "they skipped it" is
+      // ours to word, which is exactly the split `Msg`'s bare-string arm exists for.
+      const joined = Object.entries(answers).map(([q, a]) => `${q} → ${a}`).join('\n');
+      const summary: Msg = joined || freeform || { k: 'question.skipped' };
       setState((prev) => markQuestionAnswered(prev, item.requestId, summary));
     },
     // A stripped image resolves to the blob route (the cookie authenticates the <img>); an

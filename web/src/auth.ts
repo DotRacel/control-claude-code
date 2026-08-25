@@ -5,24 +5,47 @@
  * fetching the token again — which is why the same value can be pasted into a second device.
  */
 
+// The bare module `t`, not the hook: this file is not a component. A thrown AuthError is caught and
+// rendered by AuthGate immediately, so there is no window in which its wording could go stale.
+import { t, type MsgKey } from './i18n/index.ts';
+
 export interface Account {
   token: string;
   username: string;
 }
 
-/** Carries the server's own message: it already explains the failure, in the user's language. */
+/**
+ * Carries a message this CLIENT worded, chosen by the error TYPE.
+ *
+ * It used to prefer `data.error.message`, on the reasoning that the server had already explained
+ * the failure "in the user's language". That stopped being true the moment there were two
+ * languages: the server's strings are Chinese (src/server/index.ts:184-204), so an English UI
+ * showed a Chinese sentence for every rejected login. The `type` is the stable half of that
+ * contract — it is what the server actually promises — so the catalog is keyed on it, and the
+ * server's own words survive only as the fallback for a type this client has never heard of.
+ */
 export class AuthError extends Error {
   constructor(message: string, readonly type: string) { super(message); }
 }
 
-const FALLBACK: Record<string, string> = {
-  registration_closed: '服务端未开放注册',
-  bad_invite_code: '邀请码不正确',
-  bad_username: '用户名不符合要求',
-  weak_password: '密码太短',
-  username_taken: '用户名已被占用',
-  bad_credentials: '用户名或密码错误',
-  too_many_attempts: '尝试次数过多，请稍后再试',
+/**
+ * Every `error.type` /v1/auth/* can answer with.
+ *
+ * Two of these deliberately lose a number the server had: it writes the password minimum and the
+ * retry delay into the SENTENCE ("密码至少 8 位", "请 42 秒后再试") and nowhere else in the body, so
+ * a client keyed on `type` cannot recover them. Digging them back out with a regex would couple
+ * this file to the server's exact wording; the real fix is a structured `min_length` / `retry_after`
+ * field, which is a server change and out of scope here. The generic wording is what the client's
+ * own fallback already said, so this is no worse than the path it replaces.
+ */
+const AUTH_ERRORS: Record<string, MsgKey> = {
+  registration_closed: 'auth.registrationClosed',
+  bad_invite_code: 'auth.badInviteCode',
+  bad_username: 'auth.badUsername',
+  weak_password: 'auth.weakPassword',
+  username_taken: 'auth.usernameTaken',
+  bad_credentials: 'auth.badCredentials',
+  too_many_attempts: 'auth.tooManyAttempts',
 };
 
 async function post(path: string, body: unknown): Promise<Account> {
@@ -30,12 +53,13 @@ async function post(path: string, body: unknown): Promise<Account> {
   try {
     r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   } catch {
-    throw new AuthError('连不上服务器，检查网络后重试', 'network');
+    throw new AuthError(t({ k: 'auth.network' }), 'network');
   }
   const data = await r.json().catch(() => ({} as any));
   if (!r.ok) {
     const type = data?.error?.type ?? 'unknown';
-    throw new AuthError(data?.error?.message || FALLBACK[type] || `请求失败（${r.status}）`, type);
+    const key = AUTH_ERRORS[type];
+    throw new AuthError(key ? t({ k: key }) : (data?.error?.message || t({ k: 'auth.failed', p: { status: r.status } })), type);
   }
   return { token: String(data.token), username: String(data.username) };
 }

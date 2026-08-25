@@ -15,6 +15,9 @@ import { useMemo, useState } from 'react';
 import type { SessionView } from '../../ws.ts';
 import { Modal } from './Modal.tsx';
 import { toolDisplayName } from '../../tools.ts';
+// Only the hook is imported, not the bare `t`: `score()` below has a local `t` for its lowercased
+// text, and a module-level one of the same name would be shadowed there in a confusing way.
+import { useT } from '../../i18n/react.ts';
 
 /** Subsequence match, scored so earlier and tighter runs win. null = no match. */
 function score(query: string, text: string): number | null {
@@ -45,6 +48,7 @@ export function SessionSwitcher({ sessions, activeId, onOpen, onDismiss }: {
   onOpen: (s: SessionView) => void;
   onDismiss: () => void;
 }) {
+  const t = useT();
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(0);
 
@@ -72,23 +76,23 @@ export function SessionSwitcher({ sessions, activeId, onOpen, onDismiss }: {
   };
 
   return (
-    <Modal onDismiss={onDismiss} label="切换会话" width={520} align="top">
+    <Modal onDismiss={onDismiss} label={t({ k: 'switcher.title' })} width={520} align="top">
       <div className="palette">
         <input
           className="palette-input"
           autoFocus
-          placeholder="按名字、目录或分支搜索…"
+          placeholder={t({ k: 'switcher.placeholder' })}
           value={q}
           onChange={(e) => { setQ(e.target.value); setSel(0); }}
           onKeyDown={keys}
         />
         <div className="palette-list">
-          {hits.length === 0 && <div className="palette-empty">没有匹配的会话</div>}
+          {hits.length === 0 && <div className="palette-empty">{t({ k: 'switcher.empty' })}</div>}
           {hits.map((s, i) => {
             const d = s.digest;
-            const sub = d?.pendingApproval ? '需要审批'
-              : d?.toolStatus === 'running' && d.tool ? `${toolDisplayName(d.tool)} 运行中`
-              : s.status === 'active' ? (s.dir || '在线') : '离线';
+            const sub = d?.pendingApproval ? t({ k: 'list.needsApproval' })
+              : d?.toolStatus === 'running' && d.tool ? t({ k: 'switcher.toolRunning', p: { tool: toolDisplayName(d.tool) } })
+              : s.status === 'active' ? (s.dir || t({ k: 'list.online' })) : t({ k: 'list.offline' });
             return (
               <button
                 key={s.id}
@@ -98,7 +102,7 @@ export function SessionSwitcher({ sessions, activeId, onOpen, onDismiss }: {
                 onMouseEnter={() => setSel(i)}
                 onClick={() => { onOpen(s); onDismiss(); }}
               >
-                <span className="l ellipsis">{s.machine || '未知设备'}</span>
+                <span className="l ellipsis">{s.machine || t({ k: 'list.unknownDevice' })}</span>
                 <span className="r ellipsis">{sub}</span>
               </button>
             );

@@ -17,6 +17,9 @@ import { reduce, reduceAll, initialState, localSend, turnActiveIn, type Item, ty
 import { resultLine } from '../web/src/tools.ts';
 import { verdictOf, SHAPES } from '../src/wire-shape.ts';
 import { stripImageBlobs } from '../src/image-blob.ts';
+// The reducer emits catalog keys, so the assertions below check descriptors (`keyOf`) and, where
+// the wording is the point, render them in a named language (`say`) rather than the ambient one.
+import { keyOf, say } from '../web/src/i18n/index.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const EVENTS: any[] = fs.readFileSync(path.join(here, 'fixtures/transcript-shapes.jsonl'), 'utf8')
@@ -57,13 +60,15 @@ test('no raw JSON ever reaches a rendered item', () => {
   for (const it of s.items) {
     const texts: string[] = [];
     if (it.kind === 'user' || it.kind === 'prose' || it.kind === 'thinking') texts.push(it.text);
-    if (it.kind === 'status') texts.push(it.text);
-    if (it.kind === 'error') texts.push(it.title, it.detail ?? '');
-    if (it.kind === 'bgtask') texts.push(it.description);
-    for (const t of texts) {
+    // These three carry a Msg now, so they are rendered before being inspected — JSON leaking
+    // through the wire-text arm is exactly what this test is looking for.
+    if (it.kind === 'status') texts.push(say('en', it.text));
+    if (it.kind === 'error') texts.push(say('en', it.title), it.detail ?? '');
+    if (it.kind === 'bgtask') texts.push(say('en', it.description));
+    for (const text of texts) {
       // `{"` or `[{` / `["` — not a bare bracket, since Claude's own copy contains lines like
       // "[Request interrupted by user]".
-      assert.ok(!/^\s*[{[]\s*["{]/.test(t), `raw JSON rendered in a ${it.kind}: ${t.slice(0, 60)}`);
+      assert.ok(!/^\s*[{[]\s*["{]/.test(text), `raw JSON rendered in a ${it.kind}: ${text.slice(0, 60)}`);
     }
   }
 });
@@ -343,12 +348,23 @@ test('identical queued texts settle oldest-first, one echo at a time', () => {
 
 test('result lines summarise instead of dumping output', () => {
   const call = (name: string, input: any, result: string) => ({ toolUseId: 't', name, input, status: 'ok' as const, result });
-  assert.equal(resultLine(call('Read', { file_path: '/a/b.ts' }, '1\tone\n2\ttwo\n3\tthree'))!.text, '读了 3 行');
+  // The descriptor, not the sentence: these used to pin '读了 3 行', so rewording four characters
+  // of copy failed a test about summarising tool output. What matters is the key and the count.
+  assert.deepEqual(resultLine(call('Read', { file_path: '/a/b.ts' }, '1\tone\n2\ttwo\n3\tthree'))!.text, { k: 'tool.readMany', p: { n: 3 } });
+  // A count of 1 must pick the singular key, or English reads "Read 1 lines".
+  assert.deepEqual(resultLine(call('Read', { file_path: '/a/b.ts' }, 'only one line'))!.text, { k: 'tool.readOne', p: { n: 1 } });
+  // Numerals with no words around them stay a bare string — nothing here needs a language.
   assert.equal(resultLine(call('Edit', { old_string: 'a\nb', new_string: 'a\nb\nc\nd' }, ''))!.text, '+4 −2');
-  assert.equal(resultLine(call('Write', { content: 'x\ny' }, ''))!.text, '写入 2 行');
-  assert.equal(resultLine({ toolUseId: 't', name: 'Bash', input: {}, status: 'running' })!.text, 'Running…');
+  assert.deepEqual(resultLine(call('Write', { content: 'x\ny' }, ''))!.text, { k: 'tool.wroteMany', p: { n: 2 } });
+  assert.deepEqual(resultLine({ toolUseId: 't', name: 'Bash', input: {}, status: 'running' })!.text, { k: 'tool.running' });
+  // And it is still English in the Chinese UI, which is a decision (tools.ts's copy rule), not a
+  // gap in the catalog — so it is pinned in both languages.
+  assert.equal(say('zh', { k: 'tool.running' }), 'Running…');
+  assert.equal(say('en', { k: 'tool.running' }), 'Running…');
   const long = resultLine(call('Bash', { command: 'ls' }, 'a'.repeat(500)))!;
-  assert.ok(long.text.length < 130, 'a result line must never carry the whole output');
+  // A tool's own output is wire text, so it arrives as the bare-string arm rather than a key.
+  assert.equal(typeof long.text, 'string');
+  assert.ok((long.text as string).length < 130, 'a result line must never carry the whole output');
 });
 
 /**
@@ -433,7 +449,7 @@ test('an image tool_result becomes an attachment, never JSON in the card', () =>
   assert.ok((call!.images![0].bytes ?? 0) > 0, 'the placeholder needs a size before the bytes load');
   // The whole point: 600 KB of base64 used to be stringified into this string.
   assert.equal(call!.result, '', 'an image-only result carries no text');
-  assert.equal(resultLine(call!)!.text, '图片');
+  assert.deepEqual(resultLine(call!)!.text, { k: 'tool.imageOne' });
 });
 
 test('a stripped image survives as a reference the card can fetch', () => {
@@ -468,7 +484,7 @@ test('a withdrawn question card settles instead of waiting forever', () => {
   });
   assert.equal(only(asked, 'question').length, 1);
   const cancelled = reduce(asked, { type: 'control_cancel_request', request_id: 'q1' });
-  assert.equal(only(cancelled, 'question')[0].answered, '已在终端处理');
+  assert.equal(keyOf(only(cancelled, 'question')[0].answered!), 'question.handledInTerminal');
 });
 
 test('task progress fills the card in; a matching task_updated finishes it', () => {
@@ -500,7 +516,7 @@ test('task progress fills the card in; a matching task_updated finishes it', () 
 });
 
 test('a conversation reset breaks the transcript and drops the task list', () => {
-  assert.ok(only(history(), 'divider').some((d) => d.label === '对话已重置'));
+  assert.ok(only(history(), 'divider').some((d) => keyOf(d.label) === 'divider.reset'));
 
   let s = reduce(initialState(), {
     type: 'assistant',
@@ -514,20 +530,27 @@ test('a conversation reset breaks the transcript and drops the task list', () =>
 });
 
 test('the worker shutting down ends the turn and says so', () => {
-  assert.ok(only(history(), 'divider').some((d) => d.label.includes('会话已断开')));
+  assert.ok(only(history(), 'divider').some((d) => keyOf(d.label)?.startsWith('divider.disconnected')));
 
   let s = reduce(initialState(), { type: 'user', message: { role: 'user', content: '跑一下测试' } });
   assert.equal(s.live.busy, true);
   s = reduce(s, { type: 'system', subtype: 'worker_shutting_down', reason: 'host_exit' });
   assert.equal(s.live.busy, false, 'nothing is left to finish this turn');
   assert.equal(s.live.running, undefined);
-  assert.ok(only(s, 'divider')[0].label.includes('终端已退出'));
+  // The reason is a nested descriptor, so a known reason is translatable rather than pasted in.
+  assert.deepEqual(only(s, 'divider')[0].label, { k: 'divider.disconnectedWhy', p: { reason: { k: 'divider.hostExit' } } });
+
+  // An unrecognised reason is the worker's own string and must survive verbatim.
+  const odd = reduce(initialState(), { type: 'system', subtype: 'worker_shutting_down', reason: 'sigkill' });
+  assert.deepEqual(only(odd, 'divider')[0].label, { k: 'divider.disconnectedWhy', p: { reason: 'sigkill' } });
 });
 
 test('a commit or a push is worth one status line', () => {
-  assert.ok(only(history(), 'status').some((x) => x.text === '已提交 · main'));
+  assert.ok(only(history(), 'status').some((x) => say('zh', x.text) === '已提交 · main'));
   const pushed = reduce(initialState(), { type: 'system', subtype: 'vcs_state_changed', kind: 'push', branch: 'main' });
-  assert.equal(only(pushed, 'status')[0].text, '已推送 · main');
+  // Structure first — the verb is ours, the branch name is git's.
+  assert.deepEqual(only(pushed, 'status')[0].text, { k: 'status.vcs', p: { label: { k: 'status.pushed' }, branch: ' · main' } });
+  assert.equal(say('en', only(pushed, 'status')[0].text), 'Pushed · main');
   const nameless = reduce(initialState(), { type: 'system', subtype: 'vcs_state_changed' });
   assert.equal(only(nameless, 'status').length, 0, 'a kindless event says nothing worth a line');
 });
@@ -547,7 +570,12 @@ test('a compaction reports while it runs and leaves one divider with the numbers
 
   s = reduce(s, { type: 'system', subtype: 'compact_boundary',
     compact_metadata: { trigger: 'auto', pre_tokens: 167265, post_tokens: 25515 } });
-  assert.equal(only(s, 'divider')[0].label, '上下文已压缩 · 自动 · 167k → 26k');
+  // Both halves matter, so both are pinned: the descriptor the reducer chose, and the two
+  // sentences a reader actually gets out of it.
+  const label = only(s, 'divider')[0].label;
+  assert.deepEqual(label, { k: 'divider.compacted', p: { why: { k: 'compact.auto' }, size: ' · 167k → 26k' } });
+  assert.equal(say('zh', label), '上下文已压缩 · 自动 · 167k → 26k');
+  assert.equal(say('en', label), 'Context compacted · auto · 167k → 26k');
   assert.equal(s.unhandled['system:status'], undefined, 'and none of it counts as backlog');
 });
 
@@ -585,7 +613,13 @@ test('a quota event is quiet while it is allowed, and speaks when it is not', ()
     rate_limit_info: { ...allowed, status: 'exceeded' } });
   const line = only(hit, 'status')[0];
   assert.ok(line, 'a real limit is why the session stopped — it has to be visible');
-  assert.ok(line.text.includes('5 小时额度') && line.text.includes('exceeded'), line?.text);
+  assert.equal(keyOf(line.text), 'status.rateLimit');
+  // The window name is ours and translates; `status` is the worker's own enum and does not. The
+  // reset time is a `{ t }` param, which is what removed the hardcoded 'zh-CN' from the reducer —
+  // so this is asserted per language rather than as one frozen string.
+  assert.match(say('zh', line.text), /5 小时额度/);
+  assert.match(say('en', line.text), /5-hour quota/);
+  for (const l of ['zh', 'en'] as const) assert.match(say(l, line.text), /exceeded/);
 });
 
 test('a payload carries the image twice, and both copies are stripped', () => {
