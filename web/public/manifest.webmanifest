@@ -2,7 +2,7 @@
   "id": "/",
   "name": "Claude Remote",
   "short_name": "Claude",
-  "description": "在手机上遥控本机 Claude Code 会话",
+  "description": "Drive a Claude Code session on your own machine, from your phone",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
@@ -10,7 +10,7 @@
   "orientation": "portrait",
   "background_color": "#262624",
   "theme_color": "#262624",
-  "lang": "zh",
+  "lang": "en",
   "dir": "ltr",
   "categories": ["productivity", "utilities"],
   "icons": [

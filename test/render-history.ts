@@ -12,6 +12,11 @@
 import { createPool, selectHistory } from '../src/server/db.ts';
 import { reduceAll, type Item } from '../web/src/model.ts';
 import { toolDisplayName } from '../src/tool-summary.ts';
+// The reducer emits message descriptors, not prose, so this tool has to word them itself. `say`
+// pins English rather than reading the store, so the output of a dev tool does not depend on the
+// shell it was run from. (web/src/i18n/index.ts imports no React — that is deliberate, so a
+// root-level Node script like this one can use it at all.)
+import { say } from '../web/src/i18n/index.ts';
 
 const url = process.env.DATABASE_URL;
 if (!url) { console.error('DATABASE_URL is required'); process.exit(1); }
@@ -34,11 +39,16 @@ const line = (it: Item): string => {
     case 'prose': return `prose     ${JSON.stringify(it.text.slice(0, 70))}${it.streaming ? ' [streaming]' : ''}`;
     case 'thinking': return `thinking  ${it.tokens ?? '?'} tokens · ${JSON.stringify(it.text.slice(0, 50))}`;
     case 'tools': return `tools     ${it.calls.map((c) => `${toolDisplayName(c.name)}:${c.status}`).join(' | ')}`;
-    case 'todo': return `todo      ${it.tasks.map((t) => `${t.status[0]}:${t.subject.slice(0, 24)}`).join(' | ')}`;
+    case 'todo': return `todo      ${it.tasks.map((task) => `${task.status[0]}:${say('en', task.subject).slice(0, 24)}`).join(' | ')}`;
     case 'question': return `question  ${it.questions.map((q) => q.header ?? q.question.slice(0, 24)).join(' | ')} ${it.answered ? '→ answered' : '→ PENDING'}`;
-    case 'bgtask': return `bgtask    ${it.status} · ${it.description.slice(0, 50)}`;
-    case 'status': return `status    ${it.text.slice(0, 70)}`;
-    case 'error': return `error     ${it.title} ${it.detail?.slice(0, 50) ?? ''}`;
+    case 'bgtask': return `bgtask    ${it.status} · ${say('en', it.description).slice(0, 50)}`;
+    case 'status': return `status    ${say('en', it.text).slice(0, 70)}`;
+    case 'error': return `error     ${say('en', it.title)} ${it.detail?.slice(0, 50) ?? ''}`;
+    // These two had no arm at all, so `line()` returned undefined for them despite being typed
+    // `: string` — nothing type-checks test/, so it compiled and printed nothing. A divider is
+    // exactly the kind of beat this tool exists to show.
+    case 'divider': return `divider   ${say('en', it.label)}`;
+    case 'unknown': return `unknown   ${it.shape}${it.count > 1 ? ` ×${it.count}` : ''}`;
   }
 };
 
@@ -63,7 +73,7 @@ for (const it of state.items) {
   }
   if (it.kind === 'prose' && !it.text.trim()) problems.push('empty prose item');
   if (it.kind === 'user' && /^<(local-command|command-name|system-reminder)/.test(it.text)) problems.push(`synthetic user text rendered: ${it.text.slice(0, 40)}`);
-  if (it.kind === 'status' && it.text.startsWith('{')) problems.push('raw JSON in a status line');
+  if (it.kind === 'status' && say('en', it.text).startsWith('{')) problems.push('raw JSON in a status line');
 }
 console.log(`tool calls: ${calls} (${unthreaded} still open at the end)`);
 if (problems.length) { console.log('\n⚠ problems:'); for (const p of new Set(problems)) console.log('  -', p); }

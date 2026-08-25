@@ -17,6 +17,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Plus, ArrowUp, ArrowDown } from '../icons.tsx';
 import { haptic } from '../haptics.ts';
+import { useT } from '../i18n/react.ts';
 
 export function Composer({ busy, offline, slashCommands, skills, onSend, onStop, showToBottom, onToBottom }: {
   busy: boolean;
@@ -28,6 +29,7 @@ export function Composer({ busy, offline, slashCommands, skills, onSend, onStop,
   showToBottom: boolean;
   onToBottom: () => void;
 }) {
+  const t = useT();
   const [text, setText] = useState('');
   const [focus, setFocus] = useState(false);
   const [sel, setSel] = useState(0);
@@ -73,21 +75,21 @@ export function Composer({ busy, offline, slashCommands, skills, onSend, onStop,
           {matches.map((c, i) => (
             <button key={c} className={`picker-row${i === at ? ' on' : ''}`} onClick={() => take(c)}>
               <span className="cmd">/{c}</span>
-              <span className="desc">{skills.includes(c) ? '技能' : '斜杠命令'}</span>
+              <span className="desc">{t({ k: skills.includes(c) ? 'composer.skill' : 'composer.slash' })}</span>
             </button>
           ))}
         </div>
       )}
       <div className="composer-wrap">
         {showToBottom && (
-          <button className="to-bottom" onClick={onToBottom} aria-label="回到底部"><ArrowDown size={20} /></button>
+          <button className="to-bottom" onClick={onToBottom} aria-label={t({ k: 'a11y.toBottom' })}><ArrowDown size={20} /></button>
         )}
         <div className={`composer${focus ? ' focus' : ''}${offline ? ' readonly' : ''}`}>
           <textarea
             ref={ref}
             className="composer-input"
             rows={1}
-            placeholder={offline ? '离线 — 重连后可继续' : busy ? '补充说明…' : '给 Claude 发消息…'}
+            placeholder={t({ k: offline ? 'composer.offline' : busy ? 'composer.busy' : 'composer.idle' })}
             value={text}
             disabled={offline}
             onFocus={() => setFocus(true)}
@@ -124,13 +126,16 @@ export function Composer({ busy, offline, slashCommands, skills, onSend, onStop,
               <span className="lbl">Code</span>
             </div>
             <div className="composer-actions">
-              <button aria-label="更多" onClick={() => setText((t) => (t ? t : '/'))}><Plus size={22} /></button>
+              {/* `v`, not `t` — the updater's old parameter name now collides with the translator.
+                  This is also the second aria-label="More" on a chat screen, hence the testid on
+                  the header's one in ChatView.tsx. */}
+              <button aria-label={t({ k: 'a11y.more' })} onClick={() => setText((v) => (v ? v : '/'))}><Plus size={22} /></button>
               {busy && !text.trim() ? (
-                <button className="send" aria-label="停止" onClick={() => { haptic('medium'); onStop(); }}>
+                <button className="send" aria-label={t({ k: 'a11y.stop' })} onClick={() => { haptic('medium'); onStop(); }}>
                   <span className="send-square" />
                 </button>
               ) : (
-                <button className={`send${text.trim() ? ' ready' : ''}`} aria-label="发送" disabled={!text.trim() || offline} onClick={submit}>
+                <button className={`send${text.trim() ? ' ready' : ''}`} aria-label={t({ k: 'a11y.send' })} disabled={!text.trim() || offline} onClick={submit}>
                   <ArrowUp size={20} stroke="#fff" />
                 </button>
               )}

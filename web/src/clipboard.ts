@@ -12,6 +12,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { haptic } from './haptics.ts';
+import { useT } from './i18n/react.ts';
 
 /** Copies `text`, returning whether it landed. Never throws. */
 export async function copyText(text: string): Promise<boolean> {
@@ -66,6 +67,7 @@ function legacyCopy(text: string): boolean {
  * so they select the text by hand instead of tapping a dead button.
  */
 export function useCopy(text: string): { label: string; failed: boolean; copy: () => void } {
+  const t = useT();
   const [state, setState] = useState<'idle' | 'done' | 'fail'>('idle');
   const timer = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => () => clearTimeout(timer.current), []);
@@ -80,7 +82,7 @@ export function useCopy(text: string): { label: string; failed: boolean; copy: (
   };
 
   return {
-    label: state === 'done' ? '已复制' : state === 'fail' ? '复制失败' : '复制',
+    label: t({ k: state === 'done' ? 'copy.copied' : state === 'fail' ? 'copy.failed' : 'copy.copy' }),
     failed: state === 'fail',
     copy,
   };

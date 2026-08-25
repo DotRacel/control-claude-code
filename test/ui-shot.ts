@@ -22,6 +22,13 @@ const has = (n: string) => process.argv.includes(n);
 
 const OUT = path.resolve(here, '..', arg('--out', 'artifacts/ui')!);
 const BIN = process.env.CHROMIUM_BIN || 'chromium';
+/**
+ * Which language to shoot. Defaults to `zh` so the existing artifacts keep meaning what they
+ * meant; `--lang en` shoots the English UI, which is how you check that no English label overflows
+ * a chip or a button (the layout probe's alignment checks are content-independent, but its
+ * overflow check is not).
+ */
+const LOCALE = arg('--lang', 'zh')!;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -258,7 +265,7 @@ async function main() {
       // reveal, hence the synthetic mouse move onto the offline row.
       name: '01b-session-list-all',
       setup: async (c) => {
-        await c.eval(`(() => { const b = [...document.querySelectorAll('.chip')].find(e => e.textContent.trim() === '全部'); b && b.click(); })()`);
+        await c.eval(`document.querySelector('[data-testid="chip-all"]')?.click()`);
         await sleep(250);
         const box = await c.eval<{ x: number; y: number } | null>(
           `(() => { const r = [...document.querySelectorAll('.session-item')].find(e => e.textContent.includes('thinkpad'))?.getBoundingClientRect();
@@ -276,7 +283,7 @@ async function main() {
       // confirmed — the shots share one preview server and a real delete would empty it.
       name: '01c-delete-confirm',
       setup: async (c) => {
-        await c.eval(`(() => { const b = [...document.querySelectorAll('.chip')].find(e => e.textContent.trim() === '全部'); b && b.click(); })()`);
+        await c.eval(`document.querySelector('[data-testid="chip-all"]')?.click()`);
         await sleep(250);
         await c.eval(`(() => { const i = [...document.querySelectorAll('.session-item')].find(e => e.textContent.includes('thinkpad')); i && i.querySelector('.row-del').click(); })()`);
         await sleep(450);
@@ -353,21 +360,24 @@ async function main() {
       setup: async (c) => {
         await c.eval(`(() => { const b = [...document.querySelectorAll('.session-card')].find(e => e.textContent.includes('racel-dev')); b && b.click(); })()`);
         await sleep(900);
-        await c.eval(`document.querySelector('[aria-label="更多"]').click()`);
+        // data-testid, not the aria-label: the label is translated now, and there are two "More"
+        // buttons on a chat screen (this header's and the composer's +) so matching the label
+        // only ever worked by document order.
+        await c.eval(`document.querySelector('[data-testid="session-menu"]').click()`);
         await sleep(500);
       },
     },
     {
       name: '09-help-sheet',
       setup: async (c) => {
-        await c.eval(`document.querySelector('[aria-label="帮助"]').click()`);
+        await c.eval(`document.querySelector('[data-testid="help"]').click()`);
         await sleep(500);
       },
     },
     {
       name: '10-logout-confirm',
       setup: async (c) => {
-        await c.eval(`document.querySelector('[aria-label="退出登录"]').click()`);
+        await c.eval(`document.querySelector('[data-testid="logout"]').click()`);
         await sleep(500);
       },
     },
@@ -412,7 +422,8 @@ async function main() {
     },
     { name: '11-auth-gate', noCredential: true },
     { name: '12-auth-gate-register', noCredential: true, setup: async (c) => {
-      await c.eval(`[...document.querySelectorAll('.auth-tabs button')].find(b => b.textContent === '注册')?.click()`);
+      // Was an exact textContent match against '注册' — the most brittle selector in the harness.
+      await c.eval(`document.querySelector('[data-testid="auth-register"]')?.click()`);
       await sleep(300);
     } },
   ];
@@ -463,6 +474,11 @@ async function main() {
       // Per shot, so clearing it for the gate cannot leak into a later one.
       if (s.noCredential) await cdp.send('Network.deleteCookies', { name: 'ccc_credential', url: base });
       else await cdp.send('Network.setCookie', { name: 'ccc_credential', value: preview.credential, url: base, path: '/' });
+      // Pin the language. Headless chromium reports navigator.language = en-US, so without this
+      // the SPA's own detection would render English here and Chinese on a reviewer's machine —
+      // every screenshot would quietly mean something different run to run. Same cookie the
+      // session menu writes, so this pins the product's real code path, not a test-only hook.
+      await cdp.send('Network.setCookie', { name: 'ccc_lang', value: LOCALE, url: base, path: '/' });
       await cdp.send('Page.navigate', { url: base + '/' });
       await cdp.once('Page.loadEventFired');
       await sleep(700); // websocket connect + first `sessions` frame

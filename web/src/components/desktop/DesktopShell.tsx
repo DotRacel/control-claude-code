@@ -24,6 +24,7 @@ import { DesktopChat } from './DesktopChat.tsx';
 import { SessionSwitcher } from './SessionSwitcher.tsx';
 import { filterSessions, type Filter } from '../SessionList.tsx';
 import { ClaudeMark } from '../../icons.tsx';
+import { useT } from '../../i18n/react.ts';
 
 export function DesktopShell({ sessions, activeId, connection, sock, onOpen, onLogout, onDelete, registerEvent, registerHistory }: {
   sessions: SessionView[];
@@ -36,6 +37,7 @@ export function DesktopShell({ sessions, activeId, connection, sock, onOpen, onL
   registerEvent: (cb: (sid: string, p: any) => void) => void;
   registerHistory: (cb: (sid: string, events: any[]) => void) => void;
 }) {
+  const t = useT();
   const active = activeId ? sessions.find((s) => s.id === activeId) ?? null : null;
   const [switching, setSwitching] = useState(false);
   const [filter, setFilter] = useState<Filter>('active');
@@ -92,7 +94,7 @@ export function DesktopShell({ sessions, activeId, connection, sock, onOpen, onL
         ) : (
           <div className="dempty">
             <ClaudeMark size={34} fill="#3a3936" />
-            <p>{sessions.length ? '从左边选一个会话' : '还没有会话。左上角的 ? 说明怎么开一个。'}</p>
+            <p>{t({ k: sessions.length ? 'desktop.pickSession' : 'desktop.emptyShell' })}</p>
           </div>
         )}
       </main>

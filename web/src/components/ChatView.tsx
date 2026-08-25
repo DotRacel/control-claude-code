@@ -22,6 +22,7 @@ import { toolDisplayName, blobUrl } from '../tools.ts';
 import { Back, Dots } from '../icons.tsx';
 import { haptic } from '../haptics.ts';
 import { showPushNotification } from '../notify.ts';
+import { useT } from '../i18n/react.ts';
 
 export function ChatView({ session, sock, connection, onBack, registerEvent, registerHistory }: {
   session: SessionView;
@@ -31,6 +32,7 @@ export function ChatView({ session, sock, connection, onBack, registerEvent, reg
   registerEvent: (cb: (sid: string, p: any) => void) => void;
   registerHistory: (cb: (sid: string, events: any[]) => void) => void;
 }) {
+  const t = useT();
   const {
     state, busy, offline, actions, send, stop, answerPermission, output, setOutput, permissionId, announce, meta,
   } = useSession({ session, sock, connection, registerEvent, registerHistory });
@@ -67,12 +69,14 @@ export function ChatView({ session, sock, connection, onBack, registerEvent, reg
       <div className="header-frost" aria-hidden />
       <div className="header" ref={headerRef}>
         <div className="topbar">
-          <button className="icon-btn" aria-label="返回" onClick={onBack}><Back size={18} /></button>
+          <button className="icon-btn" aria-label={t({ k: 'a11y.back' })} onClick={onBack}><Back size={18} /></button>
           <div className="topbar-title">
-            <div className="t1 ellipsis">Remote Control 会话</div>
-            <div className="t2 ellipsis">{session.machine || state.live.cwd || session.dir || '会话'}</div>
+            <div className="t1 ellipsis">{t({ k: 'chat.rcSession' })}</div>
+            <div className="t2 ellipsis">{session.machine || state.live.cwd || session.dir || t({ k: 'chat.session' })}</div>
           </div>
-          <button className="icon-btn" aria-label="更多" onClick={() => setMenu(true)}><Dots size={18} /></button>
+          {/* data-testid: ui-shot opens this menu, and there is a SECOND aria-label="More" on the
+              composer's + button — matching on the label alone only worked by document order. */}
+          <button className="icon-btn" data-testid="session-menu" aria-label={t({ k: 'a11y.more' })} onClick={() => setMenu(true)}><Dots size={18} /></button>
         </div>
 
         <Banner connection={connection} sessionOffline={session.status !== 'active'} machine={session.machine} onRetry={() => sock.reconnect()} />
@@ -121,7 +125,7 @@ export function ChatView({ session, sock, connection, onBack, registerEvent, reg
       {output && <OutputSheet call={output} onDismiss={() => setOutput(null)} />}
       {menu && (
         <MenuSheet
-          meta={meta || '会话'}
+          meta={meta || t({ k: 'chat.session' })}
           mode={state.live.permissionMode}
           onMode={(m) => sock.control(session.id, 'set_permission_mode', { mode: m })}
           onEnd={stop}

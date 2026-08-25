@@ -9,10 +9,14 @@
 import { useState, type FormEvent } from 'react';
 import { register, login, checkToken, AuthError, type Account } from '../auth.ts';
 import { ClaudeMark } from '../icons.tsx';
+import { setLocale, LOCALES } from '../i18n/index.ts';
+import { useT, useLocale } from '../i18n/react.ts';
 
 type Mode = 'login' | 'register' | 'token';
 
 export function AuthGate({ onAuthed }: { onAuthed: (a: Account) => void }) {
+  const t = useT();
+  const locale = useLocale();
   const [mode, setMode] = useState<Mode>('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -32,17 +36,18 @@ export function AuthGate({ onAuthed }: { onAuthed: (a: Account) => void }) {
     setError('');
     try {
       if (mode === 'token') {
-        const t = token.trim();
-        const check = await checkToken(t);
-        if (check.status === 'ok') onAuthed({ token: t, username: check.username });
-        else setError(check.status === 'rejected' ? '这个密钥无效或已失效' : '连不上服务器，检查网络后重试');
+        // `tok`, not `t` — that name is the translator in this component now.
+        const tok = token.trim();
+        const check = await checkToken(tok);
+        if (check.status === 'ok') onAuthed({ token: tok, username: check.username });
+        else setError(t({ k: check.status === 'rejected' ? 'auth.tokenRejected' : 'auth.network' }));
       } else if (mode === 'login') {
         onAuthed(await login(username.trim(), password));
       } else {
         onAuthed(await register(username.trim(), password, invite.trim()));
       }
     } catch (err) {
-      setError(err instanceof AuthError ? err.message : '出错了，请重试');
+      setError(err instanceof AuthError ? err.message : t({ k: 'auth.unknown' }));
     } finally {
       setBusy(false);
     }
@@ -58,28 +63,30 @@ export function AuthGate({ onAuthed }: { onAuthed: (a: Account) => void }) {
 
         <div className="auth-tabs" role="tablist">
           <button type="button" role="tab" aria-selected={mode === 'login'}
-            className={mode === 'login' ? 'on' : ''} onClick={() => switchTo('login')}>登录</button>
-          <button type="button" role="tab" aria-selected={mode === 'register'}
-            className={mode === 'register' ? 'on' : ''} onClick={() => switchTo('register')}>注册</button>
+            className={mode === 'login' ? 'on' : ''} onClick={() => switchTo('login')}>{t({ k: 'auth.tabLogin' })}</button>
+          {/* data-testid: ui-shot used to find this by matching textContent === '注册' exactly,
+              which was the most brittle selector in the whole harness. */}
+          <button type="button" role="tab" aria-selected={mode === 'register'} data-testid="auth-register"
+            className={mode === 'register' ? 'on' : ''} onClick={() => switchTo('register')}>{t({ k: 'auth.tabRegister' })}</button>
         </div>
 
         {mode === 'token' ? (
           <>
-            <p>粘贴账号密钥直接连接。</p>
+            <p>{t({ k: 'auth.pasteToken' })}</p>
             <input className="cred-input" placeholder="ccc_…" value={token} autoFocus
               onChange={(e) => setToken(e.target.value)}
               autoCapitalize="off" autoCorrect="off" spellCheck={false} />
           </>
         ) : (
           <>
-            <input className="cred-input text" placeholder="用户名" value={username}
+            <input className="cred-input text" placeholder={t({ k: 'auth.username' })} value={username}
               onChange={(e) => setUsername(e.target.value)} autoComplete="username"
               autoCapitalize="off" autoCorrect="off" spellCheck={false} />
-            <input className="cred-input text" type="password" placeholder="密码" value={password}
+            <input className="cred-input text" type="password" placeholder={t({ k: 'auth.password' })} value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'} />
             {mode === 'register' && (
-              <input className="cred-input text" placeholder="邀请码" value={invite}
+              <input className="cred-input text" placeholder={t({ k: 'auth.invite' })} value={invite}
                 onChange={(e) => setInvite(e.target.value)}
                 autoCapitalize="off" autoCorrect="off" spellCheck={false} />
             )}
@@ -89,14 +96,26 @@ export function AuthGate({ onAuthed }: { onAuthed: (a: Account) => void }) {
         {error && <p className="auth-error" role="alert">{error}</p>}
 
         <button className="btn primary block" type="submit" disabled={!ready || busy}>
-          {busy ? '请稍候…' : mode === 'register' ? '注册并连接' : '连接'}
+          {t({ k: busy ? 'auth.busy' : mode === 'register' ? 'auth.registerAndConnect' : 'auth.connect' })}
         </button>
 
         <button type="button" className="auth-alt" onClick={() => switchTo(mode === 'token' ? 'login' : 'token')}>
-          {mode === 'token' ? '用账号密码登录' : '使用密钥连接'}
+          {t({ k: mode === 'token' ? 'auth.switchToPassword' : 'auth.switchToToken' })}
         </button>
 
-        {mode === 'register' && <p>注册需要邀请码，向服务器管理员索取。</p>}
+        {mode === 'register' && <p>{t({ k: 'auth.inviteNote' })}</p>}
+
+        {/*
+          The switcher has to exist HERE and not only in the session menu: the menu is behind a
+          login, and someone whose browser negotiated the wrong language cannot read the form that
+          would get them there. This is the one screen where being stuck is unrecoverable.
+        */}
+        <div className="auth-langs">
+          {LOCALES.map((l) => (
+            <button key={l.id} type="button" className={`auth-lang${locale === l.id ? ' on' : ''}`}
+              onClick={() => setLocale(l.id)}>{t({ k: l.name })}</button>
+          ))}
+        </div>
       </form>
     </div>
   );

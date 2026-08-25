@@ -264,7 +264,9 @@ textarea { font: inherit; }
 
   .popover {
     position: absolute; z-index: 60; top: calc(100% + 8px); right: 0;
-    min-width: 260px; padding: 8px 0 4px;
+    /* 300, not 260: an English label plus its value ("Permission mode" · "Never ask") needs the
+       extra 40px, where the Chinese pair fitted at 260. */
+    min-width: 300px; padding: 8px 0 4px;
     background: var(--raised); border: 1px solid var(--line-2);
     border-radius: 12px; box-shadow: 0 18px 50px rgba(0, 0, 0, .5);
   }
@@ -304,6 +306,12 @@ textarea { font: inherit; }
   font: 400 13px/1.45 var(--sans); color: var(--danger); text-align: left;
 }
 .auth-alt { margin-top: 14px; font: 400 13px/1 var(--sans); color: var(--text-3); text-decoration: underline; }
+
+/* The pre-login language picker. Quieter than .auth-alt — it is an escape hatch for the minority
+   who landed in the wrong language, not a step in signing in. */
+.auth-langs { margin-top: 18px; display: flex; align-items: center; justify-content: center; gap: 4px; }
+.auth-lang { padding: 4px 9px; border-radius: 12px; font: 400 12px/1 var(--sans); color: var(--text-3); }
+.auth-lang.on { color: var(--text); background: var(--btn-2); }
 
 /* ── buttons ── */
 .btn {
@@ -721,7 +729,10 @@ textarea { font: inherit; }
 .menu-row + .menu-row { border-top: 1px solid var(--line); }
 .menu-row:active { background: rgba(245, 244, 239, .08); }
 .menu-row.danger { color: var(--danger); }
-.menu-row .val { margin-left: auto; font: 400 13.5px/1 var(--mono); color: var(--muted); }
+/* nowrap: the value is a setting's current state ("Never ask", "Next version"), and breaking two
+   words across two lines reads as prose rather than as a value. English needs this where Chinese
+   did not — 不再询问 is four glyphs and always fitted. */
+.menu-row .val { margin-left: auto; font: 400 13.5px/1 var(--mono); color: var(--muted); white-space: nowrap; }
 .menu-label { padding: 14px var(--gutter) 8px; font: 600 11px/1 var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 
 /* the ? sheet: numbered steps, each with the command it is about */

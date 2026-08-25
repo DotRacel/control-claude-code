@@ -1,5 +1,10 @@
 /* Claude Remote shell worker. Never intercepts /v1 or /ws. */
 // Bump on every deploy that must not be served from an old cache.
+// v10 covers two unreleased changes that both needed it, which is why there is no v11: the QR
+// deep-link work, and manifest.webmanifest changing language (zh → en). The manifest is the one
+// that could not have gone without a bump — it is precached AND served cache-first below, unlike
+// index.html which is network-first and self-heals, so an installed app would otherwise have kept
+// the old one forever.
 const CACHE = 'ccc-web-v10';
 const PRECACHE = [
   './',
