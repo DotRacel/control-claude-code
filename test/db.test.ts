@@ -289,3 +289,85 @@ test('server end-to-end: /rc session + events survive a restart', { skip }, asyn
     await s2.store.close();
   }
 });
+
+test('deleting a session takes its whole transcript with it (ON DELETE CASCADE)', { skip }, async () => {
+  const pool = await db();
+  const store = new Store({ pool });
+  const s = await store.createReplSession(CRED, { dir: '/x' });
+  await store.appendEvents(s.id, [
+    { type: 'user', message: { role: 'user', content: '删之前先写三条' } },
+    { type: 'assistant', message: { content: [{ type: 'text', text: 'ok' }] } },
+    { type: 'result', subtype: 'success', is_error: false },
+  ]);
+  assert.equal((await selectHistory(pool, s.id, 100)).length, 3);
+
+  assert.equal(await store.deleteSession(s.id), 'ok');
+  assert.equal((await pool.query('select 1 from sessions where id = $1', [s.id])).rowCount, 0);
+  // The point of the cascade: one DELETE, and no orphaned rows keeping the conversation alive.
+  assert.equal((await pool.query('select 1 from events where session_id = $1', [s.id])).rowCount, 0, '记录成了孤儿行');
+  await store.close();
+});
+
+test('the retention sweep reaches rows the read cache never loaded', { skip }, async () => {
+  const pool = await db();
+  const a = new Store({ pool });
+  const old = await a.createReplSession(CRED, { dir: '/old' });
+  const keep = await a.createReplSession(CRED, { dir: '/keep' });
+  await a.appendEvents(old.id, [{ type: 'user', message: { role: 'user', content: '很久以前' } }]);
+  await pool.query(`update sessions set last_activity = now() - interval '30 days' where id = $1`, [old.id]);
+  await a.close();
+
+  // A load window shorter than the backdate: `old` is in PG and in nobody's cache, which is
+  // exactly the case a cache-only sweep would miss forever.
+  const b = new Store({ pool });
+  await b.load(7);
+  assert.equal(b.getSession(old.id), undefined, '前置条件：这一行不该在读缓存里');
+
+  const gone = await b.sweepStale(7);
+  assert.deepEqual(gone, [{ id: old.id, credential: CRED }]);
+  assert.equal((await pool.query('select 1 from events where session_id = $1', [old.id])).rowCount, 0, '事件没跟着走');
+  assert.ok(b.getSession(keep.id), '今天的会话被扫掉了');
+  await b.close();
+});
+
+test('a connected session is exempt from the sweep however old PG thinks it is', { skip }, async () => {
+  const pool = await db();
+  const a = new Store({ pool });
+  const live = await a.createReplSession(CRED, { dir: '/live' });
+  await pool.query(`update sessions set last_activity = now() - interval '30 days' where id = $1`, [live.id]);
+  await a.close();
+
+  const b = new Store({ pool });
+  await b.load(365); // wide enough to hold the backdated row
+  // Attached, but deliberately NOT via markWsConnected: that touches the session, and the row
+  // would then survive for the wrong reason. This is the case `keepIds` exists for — a child that
+  // has been quiet for a month, not one that has been gone for a month.
+  b.getSession(live.id)!.wsConnected = true;
+
+  assert.deepEqual(await b.sweepStale(7), []);
+  assert.equal((await pool.query('select 1 from sessions where id = $1', [live.id])).rowCount, 1, '在线会话被扫掉了');
+  await b.close();
+});
+
+test('the server sweeps at boot, before it answers anything', { skip }, async () => {
+  const pool = await db();
+  const prev = process.env.CCC_SESSION_TTL_DAYS;
+  process.env.CCC_SESSION_TTL_DAYS = '7'; // pinned: a runner with retention off would flake this
+  const a = new Store({ pool });
+  const stale = await a.createReplSession(CRED, { dir: '/stale' });
+  await pool.query(`update sessions set last_activity = now() - interval '30 days' where id = $1`, [stale.id]);
+  await a.close();
+
+  const announced: string[] = [];
+  const srv = await createControllerServer({ pool, onEvent: (e) => { if (e.type === 'session.delete') announced.push(e.sessionId); } });
+  try {
+    // The event matters as much as the delete: it is what makes an open web client redraw.
+    assert.deepEqual(announced, [stale.id], 'boot sweep deleted without telling anyone');
+    assert.equal(srv.store.getSession(stale.id), undefined);
+    assert.equal((await pool.query('select 1 from sessions where id = $1', [stale.id])).rowCount, 0);
+  } finally {
+    srv.close();
+    await srv.store.close();
+    if (prev === undefined) delete process.env.CCC_SESSION_TTL_DAYS; else process.env.CCC_SESSION_TTL_DAYS = prev;
+  }
+});

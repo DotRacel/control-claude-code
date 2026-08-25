@@ -14,13 +14,13 @@
  */
 import { useEffect, useState } from 'react';
 import type { SessionView } from '../../ws.ts';
-import { SessionRow, type Filter } from '../SessionList.tsx';
+import { SessionRow, deleteWarning, type Filter } from '../SessionList.tsx';
 import { desktopSurfaces } from '../../render/desktop.tsx';
 import { Help, SignOut } from '../../icons.tsx';
 import { notifyPermission, requestNotifyPermission } from '../../notify.ts';
 import { useT } from '../../i18n/react.ts';
 
-export function Sidebar({ shown, activeId, connection, filter, onFilter, onOpen, onLogout }: {
+export function Sidebar({ shown, activeId, connection, filter, onFilter, onOpen, onLogout, onDelete }: {
   /** Already filtered by DesktopShell, in render order. */
   shown: SessionView[];
   activeId: string | null;
@@ -29,11 +29,13 @@ export function Sidebar({ shown, activeId, connection, filter, onFilter, onOpen,
   onFilter: (f: Filter) => void;
   onOpen: (s: SessionView) => void;
   onLogout: () => void;
+  onDelete?: (s: SessionView) => void;
 }) {
   const t = useT();
   const [perm, setPerm] = useState(notifyPermission());
   const [help, setHelp] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<SessionView | null>(null);
   const [, tick] = useState(0);
 
   // Keep "3 分钟前" honest. Every 30s, not every second: the rows no longer show a running tool's
@@ -60,7 +62,7 @@ export function Sidebar({ shown, activeId, connection, filter, onFilter, onOpen,
       </div>
       <div className="chips">
         {(['active', 'all'] as Filter[]).map((f) => (
-          <button key={f} className={`chip${filter === f ? ' on' : ''}`} onClick={() => onFilter(f)}>
+          <button key={f} className={`chip${filter === f ? ' on' : ''}`} data-testid={`chip-${f}`} onClick={() => onFilter(f)}>
             {t({ k: f === 'active' ? 'list.filterActive' : 'list.filterAll' })}
           </button>
         ))}
@@ -77,7 +79,16 @@ export function Sidebar({ shown, activeId, connection, filter, onFilter, onOpen,
               {t({ k: connection === 'online' ? 'list.emptySidebar' : 'list.connecting' })}
             </div>
           )}
-          {shown.map((s) => <SessionRow key={s.id} s={s} onOpen={onOpen} active={s.id === activeId} />)}
+          {shown.map((s) => (
+            <SessionRow
+              key={s.id}
+              s={s}
+              onOpen={onOpen}
+              active={s.id === activeId}
+              // Withheld while the socket is down — the frame would be dropped in silence.
+              onDelete={onDelete && connection === 'online' ? setConfirmDelete : undefined}
+            />
+          ))}
         </div>
       </div>
       {help && <Help_ onDismiss={() => setHelp(false)} />}
@@ -90,6 +101,17 @@ export function Sidebar({ shown, activeId, connection, filter, onFilter, onOpen,
           confirmLabel={t({ k: 'a11y.logout' })}
           onConfirm={onLogout}
           onDismiss={() => setConfirmLogout(false)}
+        />
+      )}
+      {confirmDelete && (
+        /* Same key set as the phone's delete confirm in SessionList.tsx, for the same reason the
+           logout pair above shares one: this copy is duplicated verbatim between the two files. */
+        <Confirm
+          title={t({ k: 'list.deleteTitle' })}
+          body={deleteWarning(confirmDelete)}
+          confirmLabel={t({ k: 'list.delete' })}
+          onConfirm={() => { onDelete?.(confirmDelete); setConfirmDelete(null); }}
+          onDismiss={() => setConfirmDelete(null)}
         />
       )}
     </aside>

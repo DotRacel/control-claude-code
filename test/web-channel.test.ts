@@ -27,6 +27,9 @@ async function withLoop(fn: (ctx: {
   frames: () => any[];
   post: (payloads: unknown[]) => Promise<void>;
   sessionsFrame: () => any[];
+  /** Close the child's SSE stream and wait for the server to notice — i.e. take the session
+   * offline, which is the state in which it becomes deletable. */
+  dropChild: () => Promise<void>;
 }) => Promise<void>) {
   const server = await createControllerServer({ onEvent: (e) => web.handleEvent(e) });
   const web = attachWebChannel(server.server, server, server.store);
@@ -60,6 +63,7 @@ async function withLoop(fn: (ctx: {
         await sleep(40);
       },
       sessionsFrame: () => sessions,
+      dropChild: async () => { ac.abort(); await sleep(80); },
     });
     ac.abort();
     ws.close();
@@ -228,3 +232,45 @@ test('a phone can fetch the image behind the reference it was given', async () =
   });
 });
 
+
+// ── deleting a session ──
+
+test('a live session is not deletable: its child is holding an ingress token that would go dead', async () => {
+  await withLoop(async ({ sid, ws, server }) => {
+    assert.equal(server.store.getSession(sid)!.wsConnected, true, '前置条件：会话应当在线');
+    ws.send(JSON.stringify({ type: 'session_delete', sessionId: sid }));
+    await sleep(80);
+    assert.ok(server.store.getSession(sid), '在线会话被删掉了');
+  });
+});
+
+test('an offline session goes, history and all, and the list is pushed without it', async () => {
+  await withLoop(async ({ sid, ws, server, post, dropChild, sessionsFrame }) => {
+    await post([{ type: 'user', message: { role: 'user', content: '删我之前先记一笔' } }]);
+    assert.equal(((await server.store.historyFor(sid)) as any[]).length, 1);
+
+    await dropChild();
+    assert.equal(server.store.getSession(sid)!.wsConnected, false, '前置条件：会话应当已离线');
+
+    ws.send(JSON.stringify({ type: 'session_delete', sessionId: sid }));
+    await sleep(80);
+    assert.equal(server.store.getSession(sid), undefined, '会话没被删掉');
+    assert.equal(((await server.store.historyFor(sid)) as any[]).length, 0, '记录还留着');
+    // The row disappearing from a pushed list IS the acknowledgement — there is no reply frame.
+    assert.equal(sessionsFrame().some((x: any) => x.id === sid), false, '推来的列表里还有已删除的会话');
+  });
+});
+
+test('another account cannot delete a session it does not own', async () => {
+  await withLoop(async ({ sid, server, dropChild }) => {
+    // Offline first, so that ownership is the ONLY thing left that can refuse this.
+    await dropChild();
+    const other = (await server.store.createUser('intruder', 'pw-12345678'))!.token;
+    const evil = new WebSocket(`ws://127.0.0.1:${server.port}/ws/client?credential=${other}`);
+    await new Promise<void>((res, rej) => { evil.onopen = () => res(); evil.onerror = () => rej(new Error('ws')); });
+    evil.send(JSON.stringify({ type: 'session_delete', sessionId: sid }));
+    await sleep(80);
+    evil.close();
+    assert.ok(server.store.getSession(sid), '别人的会话被删掉了');
+  });
+});

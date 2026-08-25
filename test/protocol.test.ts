@@ -105,3 +105,48 @@ test('sessions are owned by their credential and looked up by ingress token', as
   assert.equal(store.sessionByIngressToken('nope'), undefined);
   assert.equal(store.view(sa).status, 'offline'); // no SSE yet
 });
+
+
+// ── deletion & retention ──
+
+test('deleteSession refuses a connected session, and forgets every trace of an offline one', async () => {
+  const store = new Store();
+  const env = await store.createEnv({ credential: 'A' });
+  const s = (await store.pushSessionWork(env.id, 'http://x'))!.session;
+  await store.appendEvents(s.id, [{ type: 'user', message: { role: 'user', content: 'hi' } }]);
+
+  store.markWsConnected(s.id, true);
+  assert.equal(await store.deleteSession(s.id), 'active', 'a live session must not be deletable');
+  assert.ok(store.getSession(s.id));
+
+  store.markWsConnected(s.id, false);
+  assert.equal(await store.deleteSession(s.id), 'ok');
+  assert.equal(store.getSession(s.id), undefined);
+  // The ingress-token index is the one that matters: left behind, the child's old token would
+  // still authenticate the data plane into a session nobody can see.
+  assert.equal(store.sessionByIngressToken(s.ingressToken), undefined);
+  assert.deepEqual(await store.historyFor(s.id), []);
+  assert.equal(await store.deleteSession(s.id), 'missing');
+});
+
+test('the retention sweep drops idle sessions, spares fresh and connected ones, and can be turned off', async () => {
+  const store = new Store();
+  const env = await store.createEnv({ credential: 'A' });
+  const stale = (await store.pushSessionWork(env.id, 'http://x'))!.session;
+  const fresh = (await store.pushSessionWork(env.id, 'http://x'))!.session;
+  const busy = (await store.pushSessionWork(env.id, 'http://x'))!.session;
+  const eightDaysAgo = Date.now() - 8 * 86400_000;
+  // markWsConnected touches the session, so the backdating has to come after it.
+  store.markWsConnected(busy.id, true);
+  stale.lastActivity = eightDaysAgo;
+  busy.lastActivity = eightDaysAgo;
+
+  assert.deepEqual(await store.sweepStale(0), [], '0 days means the sweep is off, not "delete everything"');
+  assert.ok(store.getSession(stale.id));
+
+  const gone = await store.sweepStale(7);
+  assert.deepEqual(gone, [{ id: stale.id, credential: 'A' }], 'the caller needs the owner, to know whose list to redraw');
+  assert.equal(store.getSession(stale.id), undefined);
+  assert.ok(store.getSession(fresh.id), 'a session from today was swept');
+  assert.ok(store.getSession(busy.id), 'a connected session is quiet, not stale');
+});

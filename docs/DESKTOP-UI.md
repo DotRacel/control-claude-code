@@ -148,6 +148,7 @@ keeps `.chat`, so the same selectors work — with two changes: the tool-row ope
 
 **On comparing screenshots.** Several shots are not deterministic: the session list renders a live
 elapsed counter and the activity spinner is mid-animation (its star frame advances every 120ms), so
-`01`, `03`, `04`, `05` and `10` differ between two runs of identical code. Compare the other ten, and when one of those differs, check the *magnitude* before
+`01`, `01b`, `01c`, `03`, `04`, `05` and `10` differ between two runs of identical code (`01b` and
+`01c` show the list too, behind the 全部 filter and behind the delete dialog). Compare the other ten, and when one of those differs, check the *magnitude* before
 believing it — dropping two wrapper divs shifted one band of the phone's composer by 2/255, which is
 compositing noise, not movement. Item heights are the reliable signal, and `ui-shot` prints them.

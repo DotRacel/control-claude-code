@@ -49,6 +49,7 @@ export const Pencil = (p: P) => <Svg {...p}><path d="M4 20h4L19 9l-4-4L4 16z" />
 /** Language. A globe rather than a flag: a language is not a country, and picking one flag for
  * English (or for Chinese) is a choice with no right answer. */
 export const Globe = (p: P) => <Svg {...p}><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.5 2.4 3.8 5.5 3.8 9S14.5 18.6 12 21c-2.5-2.4-3.8-5.5-3.8-9S9.5 5.4 12 3Z" /></Svg>;
+export const Trash = (p: P) => <Svg {...p} width={2}><path d="M4.5 6.5h15M9.5 6.5V5a1.5 1.5 0 0 1 1.5-1.5h2A1.5 1.5 0 0 1 14.5 5v1.5M6.5 6.5l.8 12a2 2 0 0 0 2 1.9h5.4a2 2 0 0 0 2-1.9l.8-12M10 10.5v6M14 10.5v6" /></Svg>;
 export const Doc = (p: P) => <Svg {...p}><path d="M6 3h7l5 5v13H6z" /></Svg>;
 export const Brain = (p: P) => <Svg {...p} width={1.8}><path d="M9.5 4.5A3.5 3.5 0 0 0 6 8v.6A3 3 0 0 0 5 14v1a3 3 0 0 0 3 3h1.5M14.5 4.5A3.5 3.5 0 0 1 18 8v.6A3 3 0 0 1 19 14v1a3 3 0 0 1-3 3h-1.5M12 4v16" /></Svg>;
 export const Picture = (p: P) => <Svg {...p} width={2}><rect x="3.5" y="5" width="17" height="14" rx="2.4" /><circle cx="8.8" cy="10" r="1.5" /><path d="m4.5 17.5 4.8-4.8 3 3L15.8 12l3.7 3.7" /></Svg>;

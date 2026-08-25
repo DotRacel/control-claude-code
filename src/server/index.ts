@@ -25,6 +25,7 @@ export type ServerEvent =
   | { type: 'env.deregister'; envId: string; credential?: string }
   | { type: 'session.create'; sessionId: string; credential: string }
   | { type: 'session.update'; sessionId: string; credential: string }
+  | { type: 'session.delete'; sessionId: string; credential: string }
   | { type: 'ws.connect'; sessionId: string; credential: string }
   | { type: 'ws.close'; sessionId: string; credential: string }
   | { type: 'claude.event'; sessionId: string; credential: string; payload: any }
@@ -102,6 +103,8 @@ export const MIN_PASSWORD = 8;
 const SAFE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif']);
 const LOGIN_MAX_FAILS = 5;
 const LOGIN_LOCK_MS = 60_000;
+/** How often the retention sweep runs. The TTL it enforces is days, so hourly is plenty. */
+const SWEEP_INTERVAL_MS = 3600_000;
 
 /** Length-safe constant-time compare — timingSafeEqual throws on a length mismatch. */
 function safeEqual(a: string, b: string): boolean {
@@ -146,6 +149,33 @@ export async function createControllerServer(opts: CreateOpts = {}): Promise<Con
   const onEvent = opts.onEvent || (() => {});
   const store = new Store({ pool: opts.pool });
   await store.load(); // hydrate the read cache before we accept any request
+
+  /**
+   * Retention. Sessions nobody has touched for CCC_SESSION_TTL_DAYS (default 7) are deleted with
+   * their transcripts — otherwise the list only ever grows and `events` keeps every byte of a
+   * conversation somebody stopped caring about six months ago.
+   *
+   * Once at boot and hourly after that. The boot pass is awaited so a restart is a clean slate
+   * rather than something that happens up to an hour later, and the interval exists because a
+   * long-lived server would otherwise never sweep at all. A connected session is never swept
+   * (store.sweepStale), so an idle-but-attached claude is safe no matter how quiet it has been.
+   *
+   * A failure here must not stop the server from coming up: retention is housekeeping, and a
+   * server that refuses to boot because one DELETE failed is strictly worse than a late sweep.
+   */
+  const sweep = async () => {
+    try {
+      const gone = await store.sweepStale();
+      for (const { id, credential } of gone) onEvent({ type: 'session.delete', sessionId: id, credential });
+      return gone.length;
+    } catch (e: any) {
+      console.error(`[server] session sweep failed: ${e.message}`);
+      return 0;
+    }
+  };
+  await sweep();
+  const sweepTimer = setInterval(() => void sweep(), SWEEP_INTERVAL_MS);
+  sweepTimer.unref?.();
 
   /** Per-username failed-login counters. Memory-only: a restart forgiving a lockout is fine. */
   const loginFails = new Map<string, { n: number; until: number }>();
@@ -408,7 +438,7 @@ export async function createControllerServer(opts: CreateOpts = {}): Promise<Con
   return new Promise((resolve) => {
     server.listen(opts.port ?? 0, opts.host ?? '127.0.0.1', () => {
       const port = (server.address() as any).port;
-      resolve({ server, port, baseUrl: `http://127.0.0.1:${port}`, store, ...api, close: () => { server.close(); void store.close(); } });
+      resolve({ server, port, baseUrl: `http://127.0.0.1:${port}`, store, ...api, close: () => { clearInterval(sweepTimer); server.close(); void store.close(); } });
     });
   });
 }

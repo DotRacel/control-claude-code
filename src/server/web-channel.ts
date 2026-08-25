@@ -131,6 +131,18 @@ export function attachWebChannel(server: Server, api: WebApi, store: Store) {
       case 'control':
         if (owns(ws, m.sessionId) && typeof m.subtype === 'string') api.sendControl(m.sessionId, m.subtype, m.extra || {});
         break;
+      /**
+       * Forget a session and its whole transcript. `owns` is the same check every other frame
+       * gets — a guessed id belonging to another account is not deletable — and the store refuses
+       * a session whose child is still connected, so this cannot be used to knock a running
+       * claude off its own control plane.
+       *
+       * The list is pushed to EVERY socket on the credential, not just this one: a second tab
+       * showing a row that no longer exists would 404 the moment it was clicked.
+       */
+      case 'session_delete':
+        if (owns(ws, m.sessionId) && (await store.deleteSession(m.sessionId)) === 'ok') pushList(ws.credential);
+        break;
     }
   }
 

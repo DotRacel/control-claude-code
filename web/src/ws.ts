@@ -88,6 +88,14 @@ export class ControlSocket {
     this.send({ type: 'permission_response', sessionId, requestId, ...answer });
   }
   control(sessionId: string, subtype: string, extra?: Record<string, unknown>) { this.send({ type: 'control', sessionId, subtype, extra }); }
+  /**
+   * Forget a session and its transcript, server-side and for good. There is no reply frame and
+   * none is needed: the server answers by pushing the credential's whole session list again, so
+   * the row disappearing IS the acknowledgement — in this tab and in every other one open on the
+   * same account. The server refuses a session whose claude is still connected, which is why the
+   * button is not drawn on a live row.
+   */
+  deleteSession(sessionId: string) { this.send({ type: 'session_delete', sessionId }); }
 
   close() { this.closed = true; this.ws?.close(); }
 }

@@ -50,6 +50,7 @@ async function main() {
       if (e.type === 'env.register') console.log(`${ts()} env.register cred=${short(e.credential)} env=${e.envId} machine=${e.body?.machine_name ?? '?'} dir=${e.body?.directory ?? '?'}`);
       else if (e.type === 'session.create') console.log(`${ts()} session.create cred=${short(e.credential)} ses=${e.sessionId}`);
       else if (e.type === 'session.update') console.log(`${ts()} session.update ses=${e.sessionId}`);
+      else if (e.type === 'session.delete') console.log(`${ts()} session.delete cred=${short(e.credential)} ses=${e.sessionId}`);
       else if (e.type === 'ws.connect') console.log(`${ts()} session online ses=${e.sessionId}`);
       else if (e.type === 'ws.close') console.log(`${ts()} session offline ses=${e.sessionId}`);
       else if (e.type === 'env.deregister') console.log(`${ts()} env.deregister env=${e.envId}`);

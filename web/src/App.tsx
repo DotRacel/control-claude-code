@@ -82,6 +82,18 @@ function Home({ credential, onLogout }: { credential: string; onLogout: () => vo
 
   const active = activeId ? sessions.find((s) => s.id === activeId) ?? null : null;
 
+  /**
+   * Delete a session, server-side and for good. There is no optimistic removal: the server answers
+   * by pushing the whole list again, which is also what makes the row vanish in every other tab
+   * open on this account. Closing it first is only about not leaving `activeId` pointing at
+   * something that no longer exists — the list push would strand the desktop rail on an empty
+   * pane a beat later anyway, and doing it here makes that instant instead of a flicker.
+   */
+  const deleteSession = (s: SessionView) => {
+    if (activeId === s.id) setActiveId(null);
+    sockRef.current?.deleteSession(s.id);
+  };
+
   if (wide && sockRef.current) {
     return (
       <DesktopShell
@@ -91,6 +103,7 @@ function Home({ credential, onLogout }: { credential: string; onLogout: () => vo
         sock={sockRef.current}
         onOpen={(s) => setActiveId(s.id)}
         onLogout={onLogout}
+        onDelete={deleteSession}
         registerEvent={(cb) => (eventCb.current = cb)}
         registerHistory={(cb) => (historyCb.current = cb)}
       />
@@ -109,5 +122,5 @@ function Home({ credential, onLogout }: { credential: string; onLogout: () => vo
       />
     );
   }
-  return <SessionList sessions={sessions} connection={connection} onOpen={(s) => setActiveId(s.id)} onLogout={onLogout} />;
+  return <SessionList sessions={sessions} connection={connection} onOpen={(s) => setActiveId(s.id)} onLogout={onLogout} onDelete={deleteSession} />;
 }

@@ -66,6 +66,12 @@ export const ZH = {
   'list.logoutTitle': '退出登录？',
   'list.logoutBody': '这台设备会忘掉密钥，下次要重新登录。电脑上的会话不受影响，继续跑。',
   'list.unknownDevice': '未知设备',
+  // ── deleting a session (arrived on main while this catalog was being written) ──
+  'list.deleteTitle': '删除这个会话？',
+  'list.deleteWarning': '「{machine}」的聊天记录会一起删掉，无法恢复。电脑上的 claude 不受影响。',
+  'list.delete': '删除',
+  'list.deleteSession': '删除会话',
+  'a11y.deleteSession': '删除会话 {machine}',
   'list.needsApproval': '需要审批',
   'list.doneWithToolsOne': '完成 · {n} 次工具调用',
   'list.doneWithToolsMany': '完成 · {n} 次工具调用',
