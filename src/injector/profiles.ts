@@ -22,8 +22,13 @@ import {
   type GateSpec,
   type InteractiveGateSpec,
   headlessGates,
+  GATE_DISPATCH_OAUTH,
+  GATE_DISPATCH_POLICY,
+  GATE_DISPATCH_OAUTH_SPLIT,
+  GATE_DISPATCH_POLICY_SPLIT,
   GATE_DISPATCH_TRUST_LEGACY,
   GATE_DISPATCH_TRUST_PREFLIGHT,
+  GATE_DISPATCH_TRUST_SPLIT,
   GATE_BRIDGEMAIN_TOKENURL_SYNC,
   GATE_BRIDGEMAIN_TOKENURL_ASYNC,
   INTERACTIVE_GATES,
@@ -56,7 +61,12 @@ export const PROFILES: InjectionProfile[] = [
     id: 'legacy',
     since: '2.1.229',
     verifiedThrough: '2.1.237',
-    gates: headlessGates({ trust: GATE_DISPATCH_TRUST_LEGACY, tokenUrl: GATE_BRIDGEMAIN_TOKENURL_SYNC }),
+    gates: headlessGates({
+      oauth: GATE_DISPATCH_OAUTH,
+      policy: GATE_DISPATCH_POLICY,
+      trust: GATE_DISPATCH_TRUST_LEGACY,
+      tokenUrl: GATE_BRIDGEMAIN_TOKENURL_SYNC,
+    }),
     interactiveGates: INTERACTIVE_GATES,
   },
   {
@@ -65,16 +75,46 @@ export const PROFILES: InjectionProfile[] = [
     id: 'preflight',
     since: '2.1.238',
     verifiedThrough: '2.1.238',
-    gates: headlessGates({ trust: GATE_DISPATCH_TRUST_PREFLIGHT, tokenUrl: GATE_BRIDGEMAIN_TOKENURL_SYNC }),
+    gates: headlessGates({
+      oauth: GATE_DISPATCH_OAUTH,
+      policy: GATE_DISPATCH_POLICY,
+      trust: GATE_DISPATCH_TRUST_PREFLIGHT,
+      tokenUrl: GATE_BRIDGEMAIN_TOKENURL_SYNC,
+    }),
     interactiveGates: INTERACTIVE_GATES,
   },
   {
     // 2.1.239 added getBridgeAccessTokenAsync beside the sync getter and made bridgeMain choose
-    // between them at runtime, so the tokenurl gate has to rebind both.
+    // between them at runtime, so the tokenurl gate has to rebind both. Held through 2.1.247, when
+    // 2.1.248's re-chunk moved the dispatch guards out of the entry entirely.
     id: 'async-token',
     since: '2.1.239',
-    verifiedThrough: '2.1.241',
-    gates: headlessGates({ trust: GATE_DISPATCH_TRUST_PREFLIGHT, tokenUrl: GATE_BRIDGEMAIN_TOKENURL_ASYNC }),
+    verifiedThrough: '2.1.247',
+    gates: headlessGates({
+      oauth: GATE_DISPATCH_OAUTH,
+      policy: GATE_DISPATCH_POLICY,
+      trust: GATE_DISPATCH_TRUST_PREFLIGHT,
+      tokenUrl: GATE_BRIDGEMAIN_TOKENURL_ASYNC,
+    }),
+    interactiveGates: INTERACTIVE_GATES,
+  },
+  {
+    // 2.1.248 re-chunked the app and lifted the remote-control branch out of the entry's inline
+    // dispatch() into chunk-77n86n8h.js, regrouped into refuseRemoteControlLocally /
+    // refuseRemoteControlIneligible / startRemoteControl. All three dispatch guards moved with it,
+    // so oauth/policy/trust each need a SPLIT variant anchored in the new chunk; bridgeMain's own
+    // gates (token/trust/httpscheme/spawn) stayed put and still use the async-token tokenurl. The
+    // same re-chunk also gave the interactive exports a bare-export defining chunk — handled in the
+    // shared INTERACTIVE_GATES locator (localFor), not here.
+    id: 'chunked-dispatch',
+    since: '2.1.248',
+    verifiedThrough: '2.1.251',
+    gates: headlessGates({
+      oauth: GATE_DISPATCH_OAUTH_SPLIT,
+      policy: GATE_DISPATCH_POLICY_SPLIT,
+      trust: GATE_DISPATCH_TRUST_SPLIT,
+      tokenUrl: GATE_BRIDGEMAIN_TOKENURL_ASYNC,
+    }),
     interactiveGates: INTERACTIVE_GATES,
   },
 ];

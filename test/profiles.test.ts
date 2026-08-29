@@ -54,7 +54,7 @@ test('selectProfile: exact matches within each profile range', () => {
     const tokenUrl = profile.gates.find((g) => g.id === 'bridgeMain.tokenurl')!;
     assert.deepEqual(Object.keys(tokenUrl.aliases).sort(), ['M', 'P']);
   }
-  for (const v of ['2.1.239', '2.1.241']) {
+  for (const v of ['2.1.239', '2.1.241', '2.1.247']) {
     const { profile, note } = selectProfile(v);
     assert.equal(profile.id, 'async-token', `${v} → async-token`);
     assert.equal(note, 'exact');
@@ -65,6 +65,35 @@ test('selectProfile: exact matches within each profile range', () => {
     const tokenUrl = profile.gates.find((g) => g.id === 'bridgeMain.tokenurl')!;
     assert.deepEqual(Object.keys(tokenUrl.aliases).sort(), ['A', 'M', 'P', 'U']);
     assert.equal(tokenUrl.rebinds.length, 3);
+    // async-token still finds all three dispatch guards inline near cli_bridge_path.
+    for (const id of ['dispatch.oauth', 'dispatch.policy', 'dispatch.trust']) {
+      assert.equal(profile.gates.find((g) => g.id === id)!.windowAnchor, 'cli_bridge_path', `${id} inline`);
+    }
+  }
+  // 2.1.248 re-chunked the app: the dispatch guards moved out of the entry into
+  // chunk-77n86n8h.js, so the whole dispatch trio switches to the SPLIT variants while the
+  // async-token tokenurl gate rides along unchanged.
+  for (const v of ['2.1.248', '2.1.250', '2.1.251']) {
+    const { profile, note } = selectProfile(v);
+    assert.equal(profile.id, 'chunked-dispatch', `${v} → chunked-dispatch`);
+    assert.equal(note, 'exact');
+    // Each SPLIT dispatch gate anchors on its own colon-destructure key in the new chunk, NOT the
+    // entry's cli_bridge_path — that's the whole point of the branch.
+    const anchors = {
+      'dispatch.oauth': 'hasStoredOAuthToken:',
+      'dispatch.policy': 'checkBridgeMinVersion:',
+      'dispatch.trust': 'preflightTrustedDeviceBlocking:',
+    } as Record<string, string>;
+    for (const id of Object.keys(anchors)) {
+      const g = profile.gates.find((x) => x.id === id)!;
+      assert.equal(g.windowAnchor, anchors[id], `${id} anchor`);
+    }
+    // The eligibility gate neutralizes the shared exitWithError (O) rather than each guard.
+    const policy = profile.gates.find((g) => g.id === 'dispatch.policy')!;
+    assert.deepEqual(Object.keys(policy.aliases).sort(), ['E', 'O']);
+    // tokenurl is still the async (4-alias) variant.
+    const tokenUrl = profile.gates.find((g) => g.id === 'bridgeMain.tokenurl')!;
+    assert.deepEqual(Object.keys(tokenUrl.aliases).sort(), ['A', 'M', 'P', 'U']);
   }
 });
 
@@ -83,7 +112,7 @@ test('the profile boundaries are contiguous — no version falls between two pro
 
 test('selectProfile: optimistic-newer picks the newest profile for unknown-newer versions', () => {
   const { profile, note } = selectProfile('2.1.999');
-  assert.equal(profile.id, 'async-token');
+  assert.equal(profile.id, 'chunked-dispatch');
   assert.equal(note, 'optimistic-newer');
   assert.equal(profile.id, newestProfile().id);
 });

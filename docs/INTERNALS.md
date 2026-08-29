@@ -73,14 +73,20 @@ carry variants in `anchors.ts` (named constants assembled by `headlessGates({tru
 Drift that is merely cosmetic (a guard that gained a parameter, a match that slid past its window)
 is absorbed by widening the one gate instead, so it never reaches this table. Known drift so far:
 
-| profile | version range | `dispatch.trust` | `bridgeMain.tokenurl` |
+| profile | version range | `dispatch.*` (oauth / policy / trust) | `bridgeMain.tokenurl` |
 |---|---|---|---|
-| `legacy` | 2.1.229 – 2.1.237 | two functions: `enrollTrustedDeviceIfNeeded` + `getTrustedDeviceUnenrolledReason` | one getter: `if(!M())` |
-| `preflight` | 2.1.238 only | one function: `preflightTrustedDeviceBlocking` | one getter: `if(!M())` |
-| `async-token` | ≥ 2.1.239 | same as `preflight` | two getters, chosen at runtime: `if(!(U?await A(r):M()))` — both rebound |
+| `legacy` | 2.1.229 – 2.1.237 | inline in the entry near `cli_bridge_path`; trust is two functions (`enrollTrustedDeviceIfNeeded` + `getTrustedDeviceUnenrolledReason`) | one getter: `if(!M())` |
+| `preflight` | 2.1.238 only | inline; trust merged into one function `preflightTrustedDeviceBlocking` | one getter: `if(!M())` |
+| `async-token` | 2.1.239 – 2.1.247 | inline; same as `preflight` | two getters, chosen at runtime: `if(!(U?await A(r):M()))` — both rebound |
+| `chunked-dispatch` | ≥ 2.1.248 | **relocated**: the whole remote-control branch moved out of the entry into `chunk-77n86n8h.js`, regrouped into `refuseRemoteControlLocally` / `refuseRemoteControlIneligible` / `startRemoteControl`. Each gate anchors on a colon-destructure key in that chunk; policy neutralizes the shared `exitWithError` to cover all three eligibility checks at once | same as `async-token` |
 
 A one-version profile like `preflight` is the expected shape, not a smell: 2.1.238 moved one guard
-and 2.1.239 moved the next one over.
+and 2.1.239 moved the next one over. `chunked-dispatch` is the opposite shape — 2.1.248's re-chunk
+moved *all three* dispatch guards at once (a genuine structural relocation, so one branch), and in
+the same release gave the interactive exports a **bare-export** defining chunk. That last part is
+not a profile: it's a fix to the shared `/rc` export-resolver (`localFor` learned the `export{n}`
+form, and locals spliced into locator regexes are now `$`-escaped — `getBridgeBaseUrl` minifies to
+`$ae` on 2.1.248). The interactive gate set is unchanged across every profile.
 
 Selection is **optimistic and never refuses on the version number**: an unknown-newer claude gets
 the newest profile, an unknown-older one gets the oldest (logged as `optimistic-newer` /

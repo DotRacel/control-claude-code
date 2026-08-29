@@ -129,6 +129,72 @@ export const GATE_DISPATCH_TRUST_PREFLIGHT: GateSpec = {
   rebinds: ['${Z}=async function(){return null}'],
 };
 
+// ── dispatch: the three eligibility guards — SPLIT variants (≥2.1.248). ──────────────────────
+// 2.1.248 lifted the whole remote-control branch out of the entry's inline dispatch() and into
+// `chunk-77n86n8h.js`, regrouped into three async functions (measured on 2.1.251):
+//   m = refuseRemoteControlLocally  — `if(!hasStoredOAuthToken())exitWithError(…)`
+//   g = refuseRemoteControlIneligible — getBridgeDisabledReason + checkBridgeMinVersion +
+//       isPolicyAllowed("allow_remote_control"), each failing through the same exitWithError
+//   y = startRemoteControl — `if(await preflightTrustedDeviceBlocking(store))exitWithError(…)`
+// So `cli_bridge_path` (still in the entry) is no longer within reach of any guard — the async-token
+// gates report alias-not-found partial={}. Each SPLIT gate anchors on a `<exportName>:` destructure
+// KEY, which is stable across minification (only the value alias churns) and — verified against all
+// 1797 chunks on 2.1.251 — occurs in this one chunk and NOT in the entry, so findSource (which
+// searches Bun.main first) lands here rather than in the defining chunk's export table.
+
+// m: the login gate. hasStoredOAuthToken (H) is destructured then `if(!H())` exits. Same rebind as
+// the inline OAUTH gate, but H is now the ONLY guard in this function — getBridgeDisabledReason and
+// checkBridgeMinVersion moved to g (below).
+export const GATE_DISPATCH_OAUTH_SPLIT: GateSpec = {
+  id: 'dispatch.oauth',
+  windowAnchor: 'hasStoredOAuthToken:',
+  windowBack: 0,
+  windowFwd: 400,
+  aliases: { H: 'hasStoredOAuthToken:([\\w$]+)\\}' },
+  bpSubstr: 'if(!${H}())',
+  rebinds: ['${H}=function(){return !0}'],
+};
+
+// g: the eligibility gate — three checks (getBridgeDisabledReason `i=await E()`,
+// checkBridgeMinVersion, isPolicyAllowed) that ALL exit through one `exitWithError` local (O). O is
+// destructured up top alongside E, but isPolicyAllowed's alias is imported only AFTER the first two
+// guards have already run — so no single breakpoint sees all three guard functions in scope. We
+// neutralize the shared exit instead: break at `=await E()` (the first guard's call, where O is
+// bound but no guard has fired yet) and rebind O to a no-op, which defuses all three at once. The
+// guards still run — they only read config — but none can exit.
+// The anchor is `checkBridgeMinVersion:`, not `getBridgeDisabledReason:`: the latter also appears
+// (destructured) in another chunk that sorts ahead of this one in the directory sweep, and
+// findSource takes the first hit, so it would land off-function with the E alias unmatched
+// (partial={}). `checkBridgeMinVersion:` is a colon-destructure KEY unique across all 1797 chunks on
+// 2.1.251 — stable under minification — and windowBack reaches back the ~26 chars to E and O, both
+// destructured just before it.
+export const GATE_DISPATCH_POLICY_SPLIT: GateSpec = {
+  id: 'dispatch.policy',
+  windowAnchor: 'checkBridgeMinVersion:',
+  windowBack: 50,
+  windowFwd: 480,
+  aliases: {
+    E: 'getBridgeDisabledReason:([\\w$]+),',
+    O: 'exitWithError:([\\w$]+)\\}',
+  },
+  bpSubstr: '=await ${E}()',
+  rebinds: ['${O}=function(){}'],
+};
+
+// y: the trusted-device gate. Structurally identical to the inline PREFLIGHT gate — `u=await Z(store)`
+// then `if(u)…exitWithError` — only relocated, so the alias regex and rebind are unchanged and only
+// the anchor moves to this chunk. Rebind Z → null so `if(u)` never fires and startRemoteControl falls
+// straight through to bridgeMain.
+export const GATE_DISPATCH_TRUST_SPLIT: GateSpec = {
+  id: 'dispatch.trust',
+  windowAnchor: 'preflightTrustedDeviceBlocking:',
+  windowBack: 0,
+  windowFwd: 450,
+  aliases: { Z: 'preflightTrustedDeviceBlocking:([\\w$]+)\\}' },
+  bpSubstr: '=await ${Z}(',
+  rebinds: ['${Z}=async function(){return null}'],
+};
+
 // ── bridgeMain: workspace-trust gate `if(…,!<trust>())` before token/baseurl.
 export const GATE_BRIDGEMAIN_TRUST: GateSpec = {
   id: 'bridgeMain.trust',
@@ -232,7 +298,11 @@ export const GATE_SPAWNER_SPAWN: GateSpec = {
 
 /** Which variant a profile uses for each gate that has drifted structurally. */
 export interface GateVariants {
-  /** dispatch.trust: LEGACY (two functions, ≤2.1.237) or PREFLIGHT (merged, ≥2.1.238). */
+  /** dispatch.oauth: INLINE (in the entry, ≤2.1.247) or SPLIT (chunk-77n86n8h function m, ≥2.1.248). */
+  oauth: GateSpec;
+  /** dispatch.policy: INLINE (≤2.1.247) or SPLIT (chunk-77n86n8h function g, exitWithError, ≥2.1.248). */
+  policy: GateSpec;
+  /** dispatch.trust: LEGACY (two functions, ≤2.1.237), PREFLIGHT (merged inline, 2.1.238–.247), or SPLIT (chunk function y, ≥2.1.248). */
   trust: GateSpec;
   /** bridgeMain.tokenurl: SYNC (≤2.1.238) or ASYNC (second getter added, ≥2.1.239). */
   tokenUrl: GateSpec;
@@ -247,8 +317,8 @@ export interface GateVariants {
  */
 export function headlessGates(variants: GateVariants): GateSpec[] {
   return [
-    GATE_DISPATCH_OAUTH,
-    GATE_DISPATCH_POLICY,
+    variants.oauth,
+    variants.policy,
     variants.trust,
     GATE_BRIDGEMAIN_TRUST,
     variants.tokenUrl,
@@ -364,7 +434,12 @@ const LOCATOR_PRELUDE = `
  * Backwards-compatible default gate set (legacy `dispatch.trust`). Kept so older callers and
  * `extract-anchors.ts` keep working; the version-aware paths take `profile.gates` instead.
  */
-export const GATES: GateSpec[] = headlessGates({ trust: GATE_DISPATCH_TRUST_LEGACY, tokenUrl: GATE_BRIDGEMAIN_TOKENURL_SYNC });
+export const GATES: GateSpec[] = headlessGates({
+  oauth: GATE_DISPATCH_OAUTH,
+  policy: GATE_DISPATCH_POLICY,
+  trust: GATE_DISPATCH_TRUST_LEGACY,
+  tokenUrl: GATE_BRIDGEMAIN_TOKENURL_SYNC,
+});
 
 /**
  * Child-process locator: the spawned `claude --print --sdk-url …` has its OWN gate —
@@ -704,12 +779,33 @@ export function buildInteractiveLocatorExpr(globalKey: string, gates: Interactiv
         function expSource(n){
           return findSource(n + ":()=>") || findSource(" as " + n + ",") || findSource(" as " + n + "}");
         }
-        /** The local binding a file exports under \`n\`, in either shape. */
+        // Minified locals are [\\w$]+, and \`$\` is the one regex metacharacter that can appear in one
+        // (e.g. getBridgeBaseUrl resolves to local \`$ae\` on 2.1.248). Any local spliced into a
+        // \`new RegExp(...)\` below must be escaped or the \`$\` reads as an end anchor and the edge
+        // silently fails to match — which surfaced as int.baseurl export-unresolved on 2.1.248/.250
+        // while int.token (local \`Ig\`) resolved. indexOf callers (\`function <local>(\`) need no escape.
+        function reEsc(x){ return x.replace(/\\$/g, "\\\\$&"); }
+        /**
+         * The local binding a file exports under \`n\`, in any of three shapes:
+         *   object-literal   \`n:()=>local\`            (esbuild single-bundle export table)
+         *   renamed export   \`local as n\`             (ES-module barrel re-export)
+         *   BARE export      \`export{…,n,…}\`           (the module declares n and exports it as-is)
+         * The bare shape is the one that appeared with 2.1.248's re-chunk: a barrel re-exports a name
+         * with a NON-renaming named import (\`import{…,hy,…}from"…"\`) and the defining chunk then
+         * \`export{…,hy,…}\` beside its \`function hy(){…}\`. Without this case the chain dead-ends at the
+         * defining chunk (localFor null) and isBridgeEnabled / getBridgeBaseUrl / getBridgeAccessToken
+         * all report export-unresolved even though the function is right there. Matched only after the
+         * two renaming forms fail, and only inside an \`export{…}\` clause, so a renamed \`n as X\` (whose
+         * bare token \`n\` also appears) is never mistaken for a bare export of n.
+         */
         function localFor(s, n){
-          var m = new RegExp(n + ":\\\\(\\\\)=>([\\\\w$]+)").exec(s);
+          var ne = reEsc(n);
+          var m = new RegExp(ne + ":\\\\(\\\\)=>([\\\\w$]+)").exec(s);
           if (m) return m[1];
-          m = new RegExp("[{,]([\\\\w$]+) as " + n + "[,}]").exec(s);
-          return m ? m[1] : null;
+          m = new RegExp("[{,]([\\\\w$]+) as " + ne + "[,}]").exec(s);
+          if (m) return m[1];
+          if (new RegExp("export\\\\{([^}]*,)?" + ne + "[,}]").test(s)) return n;
+          return null;
         }
         function resolveExport(n){
           var at = expSource(n);
@@ -724,10 +820,11 @@ export function buildInteractiveLocatorExpr(globalKey: string, gates: Interactiv
             if (!local) return null;
             var di = s.indexOf("function " + local + "(");
             if (di >= 0) return { url: url, s: s, alias: local, defIdx: di };
-            var im = new RegExp("import\\\\{[^}]*[{,]([\\\\w$]+) as " + local + "[,}][^}]*\\\\}from\\"([^\\"]+)\\"").exec(s);
+            var le = reEsc(local);
+            var im = new RegExp("import\\\\{[^}]*[{,]([\\\\w$]+) as " + le + "[,}][^}]*\\\\}from\\"([^\\"]+)\\"").exec(s);
             if (im) { url = im[2]; s = sourceText(url); name = im[1]; continue; }
             // An import that does not rename: the next file exports it under the same name.
-            var im2 = new RegExp("import\\\\{[^}]*[{,]" + local + "[,}][^}]*\\\\}from\\"([^\\"]+)\\"").exec(s);
+            var im2 = new RegExp("import\\\\{[^}]*[{,]" + le + "[,}][^}]*\\\\}from\\"([^\\"]+)\\"").exec(s);
             if (im2) { url = im2[1]; s = sourceText(url); name = local; continue; }
             return null;
           }
