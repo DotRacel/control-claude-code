@@ -8,8 +8,14 @@
  * web/src/transcript.ts and src/server/store.ts.
  */
 
-/** Wrapper tags the official clients never render. */
-const SYNTHETIC_TAG = /^\s*<(local-command-caveat|command-name|command-message|command-args|command-contents|local-command-stdout|command-stdout|bash-stdout|bash-stderr|bash-input)\b/;
+/**
+ * Wrapper tags the official clients never render. `task-notification` is the queued command claude
+ * injects when a background task finishes: it reaches us as a plain `user` message whose text is
+ * the raw `<task-notification>…` XML. The official client never shows it as a turn (the web model
+ * turns it into a card update instead — see taskNotification() in web/src/model.ts); dropping it
+ * here keeps it out of both the transcript bubbles and the session-list preview digest.
+ */
+const SYNTHETIC_TAG = /^\s*<(local-command-caveat|command-name|command-message|command-args|command-contents|local-command-stdout|command-stdout|bash-stdout|bash-stderr|bash-input|task-notification)\b/;
 
 /** Strip synthetic user-message content official clients hide. null = render nothing. */
 export function cleanUserText(raw: unknown): string | null {

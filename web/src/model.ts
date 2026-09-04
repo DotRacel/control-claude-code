@@ -81,7 +81,10 @@ export type Item =
   // `interrupted` is not a CLI status: it is what a running task becomes when the worker goes
   // away. Neither 'completed' (it did not finish) nor 'failed' (nothing went wrong) is honest.
   | { kind: 'bgtask'; id: number; taskId: string; description: Msg; status: 'running' | 'completed' | 'failed' | 'interrupted';
-      detail?: string; phases?: string[]; tools?: number; ms?: number }
+      // `summary` is the human line the completion notification carries ('Agent "X" finished', a
+      // failure reason, a Monitor event) — the point of a *finished* card, kept even when `detail`
+      // (the last running step) is dropped. `description` is what task_started named it.
+      summary?: string; detail?: string; phases?: string[]; tools?: number; ms?: number }
   | { kind: 'status'; id: number; text: Msg }
   /** A hard break in the conversation: /clear, a compaction, the worker going away. */
   | { kind: 'divider'; id: number; label: Msg }
@@ -419,9 +422,13 @@ function system(d: Draft, p: any): TranscriptState {
     case 'task_notification': {
       const taskId = String(p.task_id ?? '');
       const status = p.status === 'failed' ? 'failed' : 'completed';
+      const summary = p.summary ? String(p.summary) : undefined;
       const at = d.items.findIndex((i) => i.kind === 'bgtask' && i.taskId === taskId);
-      if (at >= 0) d.items[at] = { ...(d.items[at] as any), status };
-      else if (taskId) push(d, { kind: 'bgtask', taskId, description: p.summary ? String(p.summary) : { k: 'bgtask.untitled' }, status });
+      // The card already names the task (from task_started); the notification's summary is the
+      // *outcome* line, so add it alongside. Creating a card from the notification alone, there is
+      // nothing else to show, so the summary becomes the description — not also a duplicate line.
+      if (at >= 0) { const it = d.items[at] as Extract<Item, { kind: 'bgtask' }>; d.items[at] = { ...it, status, summary: summary ?? it.summary }; }
+      else if (taskId) push(d, { kind: 'bgtask', taskId, description: summary ?? { k: 'bgtask.untitled' }, status });
       return d;
     }
     case 'background_tasks_changed': {
@@ -562,7 +569,44 @@ function settleQueued(d: Draft, text: string): void {
   if (at >= 0) d.items[at] = { ...(d.items[at] as Extract<Item, { kind: 'user' }>), state: 'sent' };
 }
 
+/**
+ * A `<task-notification>` echo — the queued command claude injects when a background task finishes,
+ * arriving as a `user` message whose text IS the raw XML. Never a bubble (the official client never
+ * shows it as a turn): parse it into card updates instead. Covers agent/command completions, the
+ * multi-task "stopped" sweep on resume, Monitor events, and the fork-source session notice.
+ */
+function taskNotification(d: Draft, raw: string): TranscriptState {
+  // The subagent's own control tags are neutralised by the harness (`<` → `&lt;`) before they reach
+  // here; undo that only for the short summary/event lines we surface.
+  const decode = (s: string) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').trim();
+  const tag = /<status>\s*(\w+)\s*<\/status>/.exec(raw)?.[1];
+  const summary = decode(/<summary>([\s\S]*?)<\/summary>/.exec(raw)?.[1] ?? '');
+  const event = decode(/<event>([\s\S]*?)<\/event>/.exec(raw)?.[1] ?? '');
+
+  // No <status> means this is not a lifecycle end but an informational beat: a Monitor event (the
+  // task is still watching), or the fork-source session notice. Surface a compact line — and never
+  // terminate a card, which for a live Monitor would be a lie.
+  if (!tag) {
+    if (/<fork-source>/.test(raw)) push(d, { kind: 'status', text: { k: 'task.forked' } });
+    else if (event || summary) push(d, { kind: 'status', text: event || summary });
+    return d;
+  }
+
+  const status: 'completed' | 'failed' | 'interrupted' = tag === 'failed' ? 'failed' : tag === 'stopped' ? 'interrupted' : 'completed';
+  // `__orphan_summary__:*` ids are the scanner's internal markers, not tasks (the message says so).
+  const ids = [...raw.matchAll(/<task-id>([^<]+)<\/task-id>/g)].map((m) => m[1].trim()).filter((id) => id && !id.startsWith('__orphan_summary__'));
+  if (ids.length === 0) { if (summary) push(d, { kind: 'status', text: summary }); return d; }
+  for (const taskId of ids) {
+    const at = d.items.findIndex((i) => i.kind === 'bgtask' && i.taskId === taskId);
+    if (at >= 0) { const it = d.items[at] as Extract<Item, { kind: 'bgtask' }>; d.items[at] = { ...it, status, summary: summary || it.summary }; }
+    else push(d, { kind: 'bgtask', taskId, description: summary || { k: 'bgtask.untitled' }, status });
+  }
+  return d;
+}
+
 function user(d: Draft, p: any, ts: number | undefined, isHistory: boolean): TranscriptState {
+  const content = p?.message?.content;
+  if (typeof content === 'string' && /^\s*<task-notification>/.test(content)) return taskNotification(d, content);
   const taken = takeVisibleUserTexts(p, d.pendingWeb, isHistory);
   d.pendingWeb = taken.pendingWeb;
   for (const text of taken.consumed) settleQueued(d, text);
@@ -571,7 +615,6 @@ function user(d: Draft, p: any, ts: number | undefined, isHistory: boolean): Tra
     // A fresh turn has not reasoned yet — whatever the previous one ended on must not carry over.
     if (!isHistory) { d.live.busy = true; d.live.thinking = false; }
   }
-  const content = p.message?.content;
   if (Array.isArray(content)) {
     for (const t of unknownBlockTypes(content)) noteUnknown(d, `block:${t}`);
     for (const b of content) {

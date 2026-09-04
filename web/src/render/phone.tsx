@@ -141,6 +141,10 @@ function BgTaskCard({ it, cls }: { it: Extract<Item, { kind: 'bgtask' }>; cls?: 
       <div className="bgtask-text">
         <div className="t1">{t(it.description)}</div>
         <div className="t2">{t({ k: 'bgtask.label' })} · {bits.join(' · ')}</div>
+        {/* The completion notification's outcome line ('Agent "X" finished', a failure reason). The
+            point of a finished card, so it stays for every terminal state — including completed,
+            where `detail` (the last running step) is dropped as stale. */}
+        {!running && it.summary && it.summary !== t(it.description) && <div className="t3">{it.summary}</div>}
         {/* Where it got to. Dropped once a task completes (the step it ended on says nothing then),
             but kept for one that failed or was interrupted — that IS the useful part. */}
         {it.status !== 'completed' && it.detail && <div className="t3">{it.detail}</div>}

@@ -213,6 +213,7 @@ export const EN: Record<MsgKey, string> = {
   'bgtask.failed': 'Failed',
   'bgtask.interrupted': 'Interrupted',
   'bgtask.done': 'Done',
+  'task.forked': 'This session was forked from another that is still running',
 
   // ── unrendered wire shape ──
   'unknown.title': 'This message shape is not supported yet',
