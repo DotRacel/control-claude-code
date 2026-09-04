@@ -36,6 +36,24 @@ export const HIDDEN_TOOLS = new Set(['PushNotification']);
 /** Arrives as a can_use_tool permission request and is rendered as a question card, not a tool card. */
 export const QUESTION_TOOL = 'AskUserQuestion';
 
+/**
+ * Plan mode's two tools. Neither is a tool card, and the CLI agrees — both define
+ * `renderToolUseMessage(){return null}` and an empty `userFacingName()`, so the terminal draws a
+ * dedicated surface for each and no tool row at all.
+ *
+ * `ExitPlanMode` arrives as a `can_use_tool` request carrying the whole plan
+ * (`input:{plan, planFilePath}`, injected from disk by the CLI's own normalizeToolInput) and
+ * `requires_user_interaction:true` — which the control schema defines as "one-tap Approve/Deny
+ * must NOT be offered: the tool's approval card IS the user-interaction surface". So it gets a
+ * plan card, the same way AskUserQuestion gets a question card.
+ *
+ * `EnterPlanMode` never asks: its input is `{}`, it is read-only, and it is auto-approved — the
+ * only trace on the wire is the tool_use, a tool_result of internal instructions, and a re-sent
+ * `system:init` carrying the new mode (verified against 2.1.260, test/fixtures/plan-mode-*.jsonl).
+ */
+export const PLAN_EXIT_TOOL = 'ExitPlanMode';
+export const PLAN_ENTER_TOOL = 'EnterPlanMode';
+
 /** Input field that carries the headline argument, most specific first. */
 const ARG_KEYS = [
   'command', 'file_path', 'notebook_path', 'pattern', 'query', 'url', 'skill',

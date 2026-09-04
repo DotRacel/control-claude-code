@@ -202,6 +202,23 @@ export const EN: Record<MsgKey, string> = {
   'question.submit': 'Submit',
   'question.skipped': 'Skipped',
 
+  // ── plan mode (ExitPlanMode's approval card + EnterPlanMode's status line) ──
+  'plan.entered': 'Plan mode — read-only exploration, no file changes',
+  'plan.ready': "Claude's implementation plan",
+  'plan.showFull': 'Show the full plan',
+  'plan.foldPlan': 'Fold',
+  'plan.feedback': 'What should change? (optional, sent with “Keep planning”)',
+  'plan.approve': 'Approve and start',
+  'plan.approveAcceptEdits': 'Approve, auto-accept edits',
+  'plan.keepPlanning': 'Keep planning',
+  'plan.approved': 'Approved',
+  'plan.approvedAcceptEdits': 'Approved · auto-accepting edits',
+  'plan.rejected': 'Sent back for more planning',
+  // Rejected with no feedback: the model is told only that it was refused, so this gives it a
+  // direction rather than leaving it to guess.
+  'plan.rejectedDefault': 'Not yet — keep refining the plan instead of implementing it.',
+  'plan.modeChip': 'Plan mode',
+
   // ── thinking block ──
   'thinking.label': 'Thinking',
   'thinking.collapse': 'collapse',

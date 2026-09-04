@@ -9,8 +9,8 @@ sheet instead of inline dumps. Fonts are self-hosted (`web/public/fonts`, latin 
 variable ⇒ 4 files / 140 KB) and precached by the service worker.
 
 **The transcript is a pure reducer.** `web/src/model.ts` folds data-plane payloads into render
-items (`user · prose · thinking · tools · todo · question · bgtask · status · divider · error ·
-unknown`) plus a `live` block (busy, running tool, thinking tokens, model, permission mode, slash
+items (`user · prose · thinking · tools · todo · question · plan · bgtask · status · divider ·
+error · unknown`) plus a `live` block (busy, running tool, thinking tokens, model, permission mode, slash
 commands). The same function eats the history backfill and the live stream, so a reopened session
 renders identically — and it is testable without a browser (`test/model.test.ts`,
 `npm run render-history` replays a real session out of PostgreSQL).
@@ -34,7 +34,7 @@ silence and neither leak was visible from inside the app:
   `undefined`, which is a perfectly legal ReactNode. A desktop layout is a second object of the
   same type; adding a kind then fails to compile in both files until each decides how to draw it.
 
-Four things the design doc could not have known, found by reading real captured traffic:
+Five things the design doc could not have known, found by reading real captured traffic:
 
 - **`thinking` blocks arrive with `thinking: ""`** — the data plane relays the signature only,
   never the reasoning text (verified across every block of a real session). So a thinking block is
@@ -46,6 +46,17 @@ Four things the design doc could not have known, found by reading real captured 
   multi-select comma-joined. It renders as an inline question card with options, descriptions,
   previews, a free-text box and Skip. `npm run e2e-question` proves the round trip on a real
   wire: the phone's answer reaches the tool, the tool_result echoes it, the model acts on it.
+- **Plan mode is three surfaces, not a permission sheet.** `ExitPlanMode` arrives as a
+  `can_use_tool` carrying the whole plan in `input.plan`, and the wire marks it
+  `requires_user_interaction: true` — which the control schema defines as "one-tap Approve/Deny
+  must not be offered". Through the generic sheet the plan went through `toolArg` (truncated at
+  400 chars, rendered monospace) with Allow/Deny under it; it is now an inline **plan card**:
+  markdown, folded past 18 lines so the buttons stay reachable, and the terminal's own three
+  verdicts — approve, approve + `setMode:acceptEdits`, or deny with the feedback the model
+  revises against. `EnterPlanMode` is auto-approved and input-less, so it is a one-line status
+  entry, and a **plan-mode chip** above the composer says the session will not touch files while
+  the mode stands. `bash test/e2e-plan-mode.sh [exit|enter] [allow|deny|accept-edits]` drives each
+  path against a real claude; all three are verified on 2.1.260. See docs/EVENTS.md § Plan mode.
 - **`Update Todos` does not exist in 2.1.232** — the todo card is built from `TaskCreate` /
   `TaskUpdate`, and falls back to a plain tool row when the input cannot be parsed.
 - **The `/rc` bridge does not relay `stream_event`.** The CCR client uploads partial messages as
@@ -117,8 +128,8 @@ and asks twice before it forgets the key.
 Verified by: `npm test` (113 tests, ~5s — reducer invariants against real captured shapes in
 `test/fixtures/transcript-shapes.jsonl`, permission pass-through and digest derivation over a real
 socket, digest persistence across a restart, the shape column written and backfilled against a
-real PostgreSQL), `npm run e2e-interactive`, `npm run e2e-question`, and
-`cd web && npm run build` (typechecks first).
+real PostgreSQL), `npm run e2e-interactive`, `npm run e2e-question`,
+`bash test/e2e-plan-mode.sh`, and `cd web && npm run build` (typechecks first).
 
 The renderer-completeness guardrail is checked by breaking it on purpose: add a throwaway kind to
 `Item` and `cd web && tsc` must fail with `TS2741` at `render/phone.tsx`. Before that type existed
@@ -145,8 +156,9 @@ on approval, one offline — so what the browser renders came out of the same re
 session, with no claude, no inference and no database. `test/ui-shot.ts` drives chromium over CDP
 (no puppeteer), sets a *real* mobile viewport with `Emulation.setDeviceMetricsOverride`
 (`mobile: true`, DPR 3 — a bare `--window-size` leaves `mobile:false`, so `dvh`, safe-area insets
-and touch queries behave like a desktop), and captures nine states: list, transcript top/bottom,
-composing, permission sheet, question card, output sheet, menu, credential gate.
+and touch queries behave like a desktop), and captures the UI's states: list, transcript top/bottom,
+composing, permission sheet, question card, plan card (folded and expanded), output sheet, menu,
+credential gate.
 
 It prints numbers as well as pixels — every box's geometry, each transcript item's height,
 `scrollTop/scrollMax`, and any element painting outside the viewport (ignoring code blocks, the one

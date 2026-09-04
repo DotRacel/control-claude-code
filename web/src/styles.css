@@ -599,6 +599,15 @@ textarea { font: inherit; }
    beside it shifts as the frames swap */
 .activity .spin { width: 1ch; flex: none; text-align: center; }
 
+/* Plan mode, above the composer. Quiet by design — it is a standing state, not an alert, and it
+   sits next to the star spinner, which is the one thing on this bar allowed to draw the eye. */
+.mode-chip { flex: none; padding: 0 var(--gutter) 8px; }
+.mode-chip span {
+  display: inline-block; padding: 3px 9px; border-radius: 9px;
+  border: 1px solid rgba(201, 100, 66, .38); color: var(--accent-soft);
+  font: 600 11.5px/1.5 var(--sans);
+}
+
 /* new cards fade + rise 8px / 180ms; only the newest one animates (0c) */
 .enter { animation: cc-enter 180ms ease-out both; }
 @keyframes cc-enter { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: none } }
@@ -623,6 +632,25 @@ textarea { font: inherit; }
 .qactions { display: flex; gap: 9px; padding: 0 13px 13px; }
 .qanswer { padding: 10px 13px; border-top: 1px solid var(--line); font: 400 12.5px/1.6 var(--mono); color: var(--muted); }
 .qanswer b { color: var(--text-2); font-weight: 600; }
+
+/* ── plan card (ExitPlanMode — a can_use_tool ask the wire marks requires_user_interaction) ──
+   Same frame as the question card, because it is the same kind of thing: an ask that renders in
+   the transcript instead of over it. What differs is the body — a plan is markdown, often long,
+   and it is the thing being judged, so it gets prose treatment rather than a command block. */
+.plancard { border: 1px solid rgba(201, 100, 66, .45); border-radius: var(--radius-card); background: var(--raised); overflow: hidden; }
+.plancard.answered { border-color: var(--line); }
+.plancard-head { padding: 12px 13px 0; display: flex; align-items: center; gap: 9px; }
+.plancard-head .t1 { font: 700 14.5px/1.2 var(--sans); }
+.plan-body { padding: 12px 13px; font: 400 14.5px/1.55 var(--sans); color: var(--text-2); word-break: break-all; }
+/* Folded, not truncated: the text is all there, the card just does not let a 3000-char plan push
+   its own buttons off the screen. The fade says "there is more" without a second affordance. */
+.plan-body.folded { max-height: 420px; overflow: hidden; -webkit-mask-image: linear-gradient(#000 68%, transparent); mask-image: linear-gradient(#000 68%, transparent); }
+.plan-more { display: block; width: 100%; padding: 8px 13px 10px; text-align: left; font: 600 12.5px/1.4 var(--sans); color: var(--accent-soft); }
+.plan-path { padding: 0 13px 11px; font: 400 11.5px/1.5 var(--mono); color: var(--text-3); }
+/* Stacked, not a row: the three verdicts have real labels ("Approve, auto-accept edits"), and
+   side by side on a phone each one wraps to three lines of five-pixel gaps. */
+.plan-actions { display: flex; flex-direction: column; gap: 9px; padding: 0 13px 13px; }
+.plancard .plan-actions .btn.tall { min-height: 48px; font-size: 15.5px; }
 
 /* ── banners (1g): under the header, never covering content ── */
 .banner { flex: none; margin: 0 var(--gutter) 8px; display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-radius: var(--radius-card); }

@@ -108,6 +108,22 @@ function ImageAttachmentView({ att, url }: { att: ImageAttachment; url: string |
 }
 
 /**
+ * "This session will not touch your files." Plan mode is the one permission mode that changes
+ * what typing into the composer DOES, and until now the only place it appeared was two taps deep
+ * in the ⋯ menu — so a session someone put into plan mode from the terminal, or that Claude put
+ * itself into with EnterPlanMode, looked exactly like a normal one.
+ *
+ * Deliberately not part of ActivityLine: that indicator is about a turn being in flight and is
+ * the star glyph alone. This is a standing state, it must show while nothing is running, and it
+ * sits above the composer because that is where the answer is needed — before you type.
+ */
+export function ModeChip({ mode }: { mode?: string }) {
+  useLocale();
+  if (mode !== 'plan') return null;
+  return <div className="mode-chip"><span>{t({ k: 'plan.modeChip' })}</span></div>;
+}
+
+/**
  * The "the agent holds the turn" indicator, parked directly above the composer. It is the glyph
  * and nothing else: it sits inches from where you type, where a line of shifting text (a tool
  * name, a token count, a ticking duration) reflowed the bar you are aiming at and read as noise

@@ -25,6 +25,9 @@ export const desktopRenderers: ItemRenderers = {
   // Reviewed one by one: on a wider screen these read the same as they do on a phone.
   ...inherit(phoneRenderers, [
     'user', 'prose', 'thinking', 'todo', 'question',
+    // A plan card is prose with three buttons under it: nothing about it is touch-shaped, and the
+    // desktop column is the same 45rem measure, so the phone's version reads correctly here too.
+    'plan',
     'bgtask', 'status', 'divider', 'error', 'unknown',
   ]),
   tools: ({ it, isLast, h }) => <DesktopToolGroup calls={it.calls} cls={enterClass(isLast)} h={h} />,

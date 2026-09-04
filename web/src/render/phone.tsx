@@ -69,6 +69,8 @@ export const phoneRenderers: ItemRenderers = {
 
   question: ({ it, isLast, h }) => <QuestionCard it={it} cls={enterClass(isLast)} onAnswer={h.onAnswerQuestion} />,
 
+  plan: ({ it, isLast, h }) => <PlanCard it={it} cls={enterClass(isLast)} onAnswer={h.onAnswerPlan} />,
+
   bgtask: ({ it, isLast }) => <BgTaskCard it={it} cls={enterClass(isLast)} />,
 
   status: ({ it, isLast }) => <div className={`status-line ${enterClass(isLast) ?? ''}`}>{t(it.text)}</div>,
@@ -321,6 +323,82 @@ function QuestionCard({ it, cls, onAnswer }: {
             <div className="qactions">
               <button className="btn" onClick={() => { haptic('medium'); submit(true); }}>{t({ k: 'question.skip' })}</button>
               <button className="btn primary" style={{ flex: 1 }} disabled={!complete} onClick={() => { haptic('light'); submit(false); }}>{t({ k: 'question.submit' })}</button>
+            </div>
+          </>
+        )}
+    </div>
+  );
+}
+
+/**
+ * Longer than this many LINES and the plan opens folded — the one thing that must always be
+ * within reach is the verdict, and a long plan pushes its own buttons off the screen.
+ *
+ * Lines, not characters, because a character count does not survive the language: the preview's
+ * Chinese plan is 775 characters and 41 rendered lines, while 775 characters of English is about
+ * a dozen. A markdown line is roughly a rendered line in either script, which is what the fold
+ * actually cares about.
+ */
+const PLAN_FOLD_LINES = 18;
+
+/**
+ * ExitPlanMode. Like a question it arrives as a `can_use_tool` request and renders inline, but
+ * for a stronger reason than fit: the wire marks it `requires_user_interaction:true`, which the
+ * control schema defines as "one-tap Approve/Deny must not be offered — the tool's approval card
+ * IS the user-interaction surface". A generic permission sheet also had nowhere to put the plan
+ * (it went through `toolArg`, which truncates at 400 chars and renders monospace, so a 1400-char
+ * markdown plan arrived as a third of itself with the formatting gone).
+ *
+ * The three buttons are the terminal's three, and they differ on the wire, not just in wording:
+ * approve is a bare allow, "approve + auto-accept edits" rides a `setMode` permission update, and
+ * "keep planning" is a deny whose message reaches the model as feedback to revise against.
+ */
+function PlanCard({ it, cls, onAnswer }: {
+  it: Extract<Item, { kind: 'plan' }>;
+  cls?: string;
+  onAnswer: ItemActions['onAnswerPlan'];
+}) {
+  const answered = it.answered !== undefined;
+  const long = it.plan.split('\n').length > PLAN_FOLD_LINES;
+  const [open, setOpen] = useState(!long);
+  const [feedback, setFeedback] = useState('');
+  const folded = long && !open && !answered;
+
+  return (
+    <div className={`plancard${answered ? ' answered' : ''}${it.outcome === 'rejected' ? ' rejected' : ''} ${cls ?? ''}`}>
+      <div className="plancard-head">
+        <ClaudeMark size={15} fill="#d97757" />
+        <span className="t1">{t({ k: 'plan.ready' })}</span>
+      </div>
+      <div className={`plan-body md${folded ? ' folded' : ''}`}>{renderMarkdown(it.plan)}</div>
+      {long && !answered && (
+        <button className="plan-more" onClick={() => { haptic('selection'); setOpen(!open); }}>
+          {t({ k: open ? 'plan.foldPlan' : 'plan.showFull' })}
+        </button>
+      )}
+      {it.planFilePath && <div className="plan-path ellipsis">{it.planFilePath}</div>}
+      {answered
+        ? <div className="qanswer">{t(it.answered!)}</div>
+        : (
+          <>
+            <div className="qblock" style={{ paddingTop: 0 }}>
+              <input
+                className="qother" placeholder={t({ k: 'plan.feedback' })} value={feedback}
+                onChange={(e) => setFeedback(e.target.value)}
+              />
+            </div>
+            <div className="plan-actions">
+              <button className="btn primary tall" onClick={() => { haptic('light'); onAnswer(it, 'approve'); }}>
+                {t({ k: 'plan.approve' })}
+              </button>
+              <button className="btn tall" onClick={() => { haptic('light'); onAnswer(it, 'approve-accept-edits'); }}>
+                {t({ k: 'plan.approveAcceptEdits' })}
+              </button>
+              {/* Not `danger`: sending a plan back is the normal other half of reviewing one, not
+                  a destructive act — the session simply stays in plan mode and Claude revises. */}
+              <button className="btn tall" onClick={() => { haptic('medium'); onAnswer(it, 'reject', feedback.trim() || undefined); }}>
+                {t({ k: 'plan.keepPlanning' })}
+              </button>
             </div>
           </>
         )}

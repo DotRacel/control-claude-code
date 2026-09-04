@@ -31,6 +31,15 @@ export interface ItemActions {
   onOpenOutput: (call: ToolCall) => void;
   onAnswerQuestion: (item: Extract<Item, { kind: 'question' }>, answers: Record<string, string>, freeform?: string) => void;
   /**
+   * Answer an ExitPlanMode ask. Three verdicts rather than allow/deny, because that is what the
+   * terminal offers and what the worker acts on differently: `approve` starts the work in
+   * whatever mode preceded plan; `approve-accept-edits` rides the same allow but carries a
+   * `setMode` permission update, so file edits stop asking; `reject` is a deny whose `message` is
+   * the feedback the model revises against (verified — it comes back to the model verbatim as
+   * "the user said: …" and it keeps planning).
+   */
+  onAnswerPlan: (item: Extract<Item, { kind: 'plan' }>, verdict: 'approve' | 'approve-accept-edits' | 'reject', feedback?: string) => void;
+  /**
    * Where to load a tool's image from — injected because only the view knows the session id, and
    * because it keeps the components free of the base64-vs-reference distinction. Returns
    * undefined when an attachment cannot be resolved at all.

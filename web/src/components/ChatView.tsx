@@ -14,7 +14,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ControlSocket, SessionView, Connection, PermissionAnswer } from '../ws.ts';
 import { useSession, useTranscriptScroll } from '../session.ts';
 import { ItemView } from './Transcript.tsx';
-import { ActivityLine, Banner } from '../render/parts.tsx';
+import { ActivityLine, Banner, ModeChip } from '../render/parts.tsx';
 import { phoneRenderers } from '../render/phone.tsx';
 import { Composer } from './Composer.tsx';
 import { PermissionSheet, OutputSheet, MenuSheet } from './Sheets.tsx';
@@ -101,6 +101,10 @@ export function ChatView({ session, sock, connection, onBack, registerEvent, reg
       {busy && !offline && (
         <ActivityLine running={state.live.running} thinking={state.live.thinking} tokens={state.live.thinkingTokens} compacting={state.live.compacting} />
       )}
+
+      {/* Not gated on `busy`: plan mode is a standing state, and the moment it matters most is
+          while nothing is running and you are about to type. */}
+      <ModeChip mode={state.live.permissionMode} />
 
       <Composer
         busy={busy}

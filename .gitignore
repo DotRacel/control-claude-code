@@ -7,3 +7,7 @@ web/dist/
 *.log
 .DS_Store
 artifacts/
+
+# Plan-mode capture runs: raw transcripts off a real session (paths, prose). The SHAPES they
+# taught are in test/fixtures/transcript-shapes.jsonl; regenerate with test/e2e-plan-mode.sh.
+test/fixtures/plan-mode-*.jsonl

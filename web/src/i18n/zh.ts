@@ -215,6 +215,22 @@ export const ZH = {
   'question.submit': '提交',
   'question.skipped': '已跳过',
 
+  // ── plan mode（ExitPlanMode 的批准卡片 + EnterPlanMode 的状态行）──
+  'plan.entered': '已进入计划模式 — 只读探索，不改动文件',
+  'plan.ready': 'Claude 的实现计划',
+  'plan.showFull': '展开完整计划',
+  'plan.foldPlan': '收起',
+  'plan.feedback': '想让它改什么？（选填，用于「继续规划」）',
+  'plan.approve': '批准，开始实现',
+  'plan.approveAcceptEdits': '批准，并自动接受编辑',
+  'plan.keepPlanning': '继续规划',
+  'plan.approved': '已批准',
+  'plan.approvedAcceptEdits': '已批准 · 自动接受编辑',
+  'plan.rejected': '退回继续规划',
+  // 拒绝时没填反馈：模型只知道被拒，这句给它一个方向。
+  'plan.rejectedDefault': '先不要开始实现，继续完善这个计划。',
+  'plan.modeChip': '计划模式',
+
   // ── thinking block ──
   'thinking.label': '思考',
   'thinking.collapse': '收起',

@@ -163,6 +163,55 @@ src/server/store.ts foldDigest agree on this rule).
 `can_use_tool` is the permission ask — the web renders a prompt (tool_name + input + why), then we
 reply with a `control_response`. Other child→host subtypes (○): `mcp_message`, `hook_callback`.
 
+**`requires_user_interaction: true` forbids a one-tap Allow/Deny.** The control schema's own
+words: *"True when one-tap Approve/Deny must not be offered: the tool's approval card IS the
+user-interaction surface (Tool.requiresUserInteraction()) … the user has to open the session to
+answer."* Two tools set it — `AskUserQuestion` and `ExitPlanMode` — and both need a dedicated
+inline card rather than the generic permission sheet. A client that ignores the flag renders
+exactly what it forbids.
+
+## Plan mode
+
+Verified end to end against claude 2.1.260 through a real `/rc` bridge (`test/e2e-plan-mode.sh`;
+the payloads are in `test/fixtures/transcript-shapes.jsonl`). Note that a stream-json probe cannot
+reach any of this: under `-p` the CLI answers `No such tool available: ExitPlanMode. ExitPlanMode
+is disabled for this session`, so only an interactive claude behind the bridge emits it.
+
+**`EnterPlanMode` never asks.** Its input schema is empty (`{}`), it is read-only, and it is
+auto-approved — no `can_use_tool` is sent. On the wire it is a `tool_use` with `input:{}`, a
+`tool_result` of ~200 words of instructions aimed at the model, and then the mode echo below. The
+CLI itself renders neither (`renderToolUseMessage(){return null}`, empty `userFacingName()`), so a
+tool card with an empty input is wrong on both counts.
+
+**`ExitPlanMode` asks, and carries the whole plan.**
+```json
+{ "subtype": "can_use_tool", "tool_name": "ExitPlanMode", "display_name": "ExitPlanMode",
+  "input": { "plan": "# …the entire plan, as markdown…", "planFilePath": "/home/…/.claude/plans/….md" },
+  "tool_use_id": "toolu_…", "description": "", "requires_user_interaction": true }
+```
+`plan` and `planFilePath` are injected from the plan file by the CLI's own `normalizeToolInput`,
+so they are present even though the declared input schema has neither. Two traps: `description` is
+the **empty string** (there is no reason line to show), and `permission_suggestions` is **absent**
+— so a client that builds its buttons only out of suggestions offers nothing but allow/deny.
+
+The three answers, which differ on the wire and not just in wording:
+
+| verdict | `control_response` | what the worker does |
+|---|---|---|
+| approve | `{behavior:"allow"}` | exits plan mode into `prePlanMode` (`default` unless plan was entered from another mode) |
+| approve + auto-accept edits | `{behavior:"allow", permission_updates:[{type:"setMode",mode:"acceptEdits",destination:"session"}]}` | exits into `acceptEdits` — **verified accepted** even though the ask suggested nothing |
+| keep planning | `{behavior:"deny", message:"…"}` | stays in plan mode; the message reaches the model verbatim as *"the user said: …"* and it revises |
+
+An approved `tool_result` repeats **the entire plan back** (`## Approved Plan:\n…`), so a client
+must not render that text under the card it already drew the plan on.
+
+**A permission-mode change is announced by re-sending `system:init`.** There is no event of its
+own — `permission_mode_changed` exists in the bundle but is OTel telemetry, not wire traffic. The
+re-sent init carries the new `permissionMode`, and on a `/rc` session it carries **`cwd:""` and
+`tools:[]`**, so a client that overwrites those fields unconditionally blanks out what it already
+knew. Observed sequence for one plan cycle: `init(plan)` on entry → the ask → `init(default)` or
+`init(acceptEdits)` on approval; a rejection emits no init at all, because the mode did not change.
+
 ### `control_cancel_request` ✓ — a request is withdrawn
 ```json
 { "type": "control_cancel_request", "request_id": "<the control_request's id>", "uuid": "…" }
@@ -218,7 +267,11 @@ An auto-approved tool (safe, in-workdir) skips steps 2–3. A `deny` short-circu
   and `permission_suggestions` as one-tap options; reply `control_response`. The reason arrives in
   **`description`** — `decision_reason` is the control-schema's name for it and was never seen on
   the wire, so reading only that leaves the modal with no explanation. Handle
-  `control_cancel_request` too, or the modal outlives the request.
+  `control_cancel_request` too, or the modal outlives the request. An ask carrying
+  `requires_user_interaction` is the exception and must NOT get this modal: `AskUserQuestion` is a
+  question card and `ExitPlanMode` is a plan card, both inline (see **Plan mode** above).
+- **Permission mode**: seeded from `system:init` and updated by the same payload being re-sent —
+  guard every field against the empty `cwd`/`tools` a re-sent init carries.
 - **Status chips**: `system:post_turn_summary`, `system:task_*`, `system:thinking_tokens`,
   `system:api_error`/`permission_denied`.
 - **Session bootstrap**: `system:init` → tool list, model, permission mode.

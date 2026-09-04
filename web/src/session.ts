@@ -16,7 +16,7 @@
 import { useEffect, useMemo, useRef, useState, type UIEvent } from 'react';
 import type { ControlSocket, SessionView, Connection, PermissionAnswer } from './ws.ts';
 import {
-  reduce, initialState, localSend, markQuestionAnswered, clearPermission, turnActiveIn,
+  reduce, initialState, localSend, markQuestionAnswered, markPlanAnswered, clearPermission, turnActiveIn,
   type TranscriptState, type ToolCall,
 } from './model.ts';
 import type { ItemActions } from './render/contract.ts';
@@ -122,6 +122,26 @@ export function useSession({ session, sock, connection, registerEvent, registerH
       const joined = Object.entries(answers).map(([q, a]) => `${q} → ${a}`).join('\n');
       const summary: Msg = joined || freeform || { k: 'question.skipped' };
       setState((prev) => markQuestionAnswered(prev, item.requestId, summary));
+    },
+    onAnswerPlan: (item, verdict, feedback) => {
+      const answer: PermissionAnswer = verdict === 'reject'
+        // The feedback IS the message: the worker hands it to the model as "the user said: …" and
+        // the model revises the plan against it. Without one the deny still lands, and the model
+        // is told only that it was rejected — so the placeholder asks for a reason, but an empty
+        // box must not block the button.
+        ? { behavior: 'deny', message: feedback || t({ k: 'plan.rejectedDefault' }) }
+        : verdict === 'approve-accept-edits'
+          // The worker's own permission-update shape, the same one `permission_suggestions` uses
+          // elsewhere. ExitPlanMode offers no suggestions of its own (measured: the field is
+          // absent), so this is the one place the client names a mode — and it names the mode the
+          // terminal's own second option names, nothing wider.
+          ? { behavior: 'allow', updatedPermissions: [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }] }
+          : { behavior: 'allow' };
+      sock.respondPermission(session.id, item.requestId, answer);
+      const summary: Msg = verdict === 'reject'
+        ? (feedback ? `${t({ k: 'plan.rejected' })} · ${feedback}` : { k: 'plan.rejected' })
+        : { k: verdict === 'approve-accept-edits' ? 'plan.approvedAcceptEdits' : 'plan.approved' };
+      setState((prev) => markPlanAnswered(prev, item.requestId, verdict === 'reject' ? 'rejected' : 'approved', summary));
     },
     // A stripped image resolves to the blob route (the cookie authenticates the <img>); an
     // unstripped one already carries its own data URL.

@@ -41,6 +41,7 @@
     "probe-interactive": "node test/probe-interactive.ts",
     "e2e-interactive": "bash test/e2e-interactive.sh",
     "e2e-question": "bash test/e2e-question.sh",
+    "e2e-plan-mode": "bash test/e2e-plan-mode.sh",
     "e2e-persist": "bash test/e2e-persist.sh",
     "db:up": "docker compose up -d db",
     "db:down": "docker compose down",

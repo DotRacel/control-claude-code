@@ -339,6 +339,28 @@ async function main() {
       },
     },
     {
+      // The plan-mode session: the card is the last item, so opening the session lands on it
+      // already — which is also what the phone does in real life when the ask arrives.
+      name: '06b-plan-card',
+      setup: async (c) => {
+        await c.eval(`(() => { const b = [...document.querySelectorAll('.session-card')].find(e => e.textContent.includes('checkout-box')); b && b.click(); })()`);
+        await sleep(1200);
+        await c.eval(`document.querySelector('.plancard')?.scrollIntoView({ block: 'start' })`);
+        await sleep(300);
+      },
+    },
+    {
+      name: '06c-plan-card-expanded',
+      setup: async (c) => {
+        await c.eval(`(() => { const b = [...document.querySelectorAll('.session-card')].find(e => e.textContent.includes('checkout-box')); b && b.click(); })()`);
+        await sleep(1200);
+        await c.eval(`document.querySelector('.plan-more')?.click()`);
+        await sleep(300);
+        await c.eval(`document.querySelector('.plan-actions')?.scrollIntoView({ block: 'end' })`);
+        await sleep(300);
+      },
+    },
+    {
       name: '07-output-sheet',
       setup: async (c) => {
         await c.eval(`(() => { const b = [...document.querySelectorAll('.session-card')].find(e => e.textContent.includes('racel-dev')); b && b.click(); })()`);

@@ -106,6 +106,74 @@ test('AskUserQuestion is a question card, never a tool row', () => {
   assert.ok(!calls.some((c) => c.name === 'AskUserQuestion'), 'AskUserQuestion leaked into a tool group');
 });
 
+/**
+ * Plan mode, against the payloads test/e2e-plan-mode.sh captured off a real 2.1.260 `/rc`
+ * session. The generic permission sheet used to take this ask: it ran the plan through `toolArg`,
+ * which truncates at 400 chars and renders monospace, and offered Allow/Deny — the exact one-tap
+ * pair `requires_user_interaction:true` exists to forbid.
+ */
+test('ExitPlanMode is a plan card carrying the whole plan, never a permission sheet', () => {
+  const s = history();
+  const plans = only(s, 'plan');
+  assert.equal(plans.length, 1, 'the plan ask did not become a plan card');
+  const ask = EVENTS.find((e) => e.request?.tool_name === 'ExitPlanMode')!;
+  assert.equal(plans[0].plan, ask.request.input.plan, 'the plan must reach the card whole — not truncated');
+  assert.ok(plans[0].plan.length > 400, 'a plan this short would not prove the truncation is gone');
+  assert.equal(plans[0].planFilePath, ask.request.input.planFilePath);
+  const calls = only(s, 'tools').flatMap((t) => t.calls);
+  assert.ok(!calls.some((c) => c.name === 'ExitPlanMode'), 'ExitPlanMode leaked into a tool group');
+  assert.equal(s.live.permission, undefined, 'the plan ask must not also open the generic sheet');
+});
+
+test('an approved plan settles as approved, without printing the plan twice', () => {
+  const card = only(history(), 'plan')[0];
+  assert.equal(card.outcome, 'approved');
+  assert.deepEqual(card.answered, { k: 'plan.approved' });
+  // The wire's own result text appends the ENTIRE plan again; echoing it under the card would
+  // render the plan a second time, which is what `answered` being a catalog key prevents.
+  assert.ok(!say('en', card.answered!).includes('--version'), 'the tool_result text leaked into the card');
+});
+
+test('a plan ask with no tool_result stays answerable', () => {
+  const withoutResult = EVENTS.filter((e) => !(e.type === 'user' && Array.isArray(e.message?.content)
+    && e.message.content.some((b: any) => b.type === 'tool_result' && b.tool_use_id === 'toolu_01PlanExitFixture0001')));
+  const open = only(reduceAll(withoutResult, { isHistory: true }), 'plan')[0];
+  assert.equal(open.answered, undefined);
+  assert.equal(open.outcome, undefined);
+});
+
+test('a plan answered in the terminal closes the card instead of stranding it', () => {
+  const upTo = EVENTS.slice(0, EVENTS.findIndex((e) => e.request?.tool_name === 'ExitPlanMode') + 1);
+  const s = reduceAll([...upTo, { type: 'control_cancel_request', request_id: 'req_plan_exit' }], { isHistory: true });
+  assert.deepEqual(only(s, 'plan')[0].answered, { k: 'question.handledInTerminal' });
+});
+
+test('EnterPlanMode is a status line, never a tool card with an empty input', () => {
+  const s = history();
+  const calls = only(s, 'tools').flatMap((t) => t.calls);
+  assert.ok(!calls.some((c) => c.name === 'EnterPlanMode'), 'EnterPlanMode leaked into a tool group');
+  assert.ok(only(s, 'status').some((i) => keyOf(i.text) === 'plan.entered'), 'entering plan mode left no trace at all');
+  // Its result is 200 words of instructions to the model. None of that belongs on screen.
+  for (const it of s.items) {
+    assert.ok(!JSON.stringify(it).includes('DO NOT write or edit any files yet'),
+      "EnterPlanMode's instruction-shaped tool_result reached the transcript");
+  }
+});
+
+/**
+ * The mode is not pushed as an event of its own: the worker RE-SENDS `system:init` when it
+ * changes, and on a /rc session that init carries `cwd:''` and `tools:[]`. So the same payload
+ * that updates the mode must not blank out everything else the client learned.
+ */
+test('a re-sent init moves the permission mode and blanks nothing', () => {
+  const upTo = (uuid: string) => reduceAll(EVENTS.slice(0, EVENTS.findIndex((e) => e.uuid === uuid) + 1), { isHistory: true });
+  const entered = upTo('c1a7f2d0-0102-4000-8000-000000000102');
+  assert.equal(entered.live.permissionMode, 'plan');
+  const exited = upTo('c1a7f2d0-0106-4000-8000-000000000106');
+  assert.equal(exited.live.permissionMode, 'default', 'exiting plan mode never reached the client');
+  assert.ok(exited.live.slashCommands.length > 0, 'the re-sent init wiped the slash commands');
+});
+
 test('a question with a tool_result is settled; one without stays answerable', () => {
   const answered = reduceAll(EVENTS, { isHistory: true });
   // Drop the tool_result that answers it and the card must stay open — a replayed transcript

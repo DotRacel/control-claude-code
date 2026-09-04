@@ -17,7 +17,7 @@ import { useState } from 'react';
 import type { ControlSocket, SessionView, Connection } from '../../ws.ts';
 import { useSession, useTranscriptScroll } from '../../session.ts';
 import { ItemView } from '../Transcript.tsx';
-import { ActivityLine, Banner } from '../../render/parts.tsx';
+import { ActivityLine, Banner, ModeChip } from '../../render/parts.tsx';
 import { desktopRenderers, desktopSurfaces } from '../../render/desktop.tsx';
 import { Composer } from '../Composer.tsx';
 import { Dots } from '../../icons.tsx';
@@ -94,6 +94,8 @@ export function DesktopChat({ session, sock, connection, registerEvent, register
         {busy && !offline && (
           <ActivityLine running={state.live.running} thinking={state.live.thinking} tokens={state.live.thinkingTokens} compacting={state.live.compacting} />
         )}
+        {/* Standing state, so unlike the activity line it is not gated on `busy`. */}
+        <ModeChip mode={state.live.permissionMode} />
         <Composer
           busy={busy}
           offline={offline}

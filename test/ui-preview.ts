@@ -74,6 +74,50 @@ const EXTRA: any[] = [
   },
 ];
 
+/** Long enough to fold (the card folds past 900 chars), and mixed-script for the same reason the
+ * rest of this file is: the layout only breaks on real text. */
+const PREVIEW_PLAN = `# 为结账流程加幂等键
+
+## 现状
+
+\`POST /checkout\` 目前没有任何去重：用户在弱网下重复点击「提交订单」，会真的创建两笔订单，
+下游的库存扣减和支付请求也跟着跑两遍。生产上这个月已经出现 3 次。
+
+## 修改的文件
+
+- \`src/routes/checkout.ts\` — 读取并校验请求头
+- \`src/db/idempotency.ts\` — 新增，键的存取
+- \`migrations/0042_idempotency_keys.sql\` — 新增表
+
+## 步骤
+
+### 1. 建表
+
+\`\`\`sql
+CREATE TABLE idempotency_keys (
+  key         text PRIMARY KEY,
+  response    jsonb NOT NULL,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+\`\`\`
+
+### 2. 在路由入口拦一层
+
+读 \`Idempotency-Key\` 请求头；命中已有记录就直接回放存下来的响应，不再执行下单逻辑。
+没有这个头时保持现有行为不变——先不强制，避免打断已经上线的客户端。
+
+### 3. 落库与回放写在同一个事务里
+
+否则并发的两个请求会同时越过「查不到键」这一步。用 \`INSERT ... ON CONFLICT DO NOTHING\`
+的返回行数来决定谁是赢家。
+
+## 验证
+
+- 同一个 key 连发两次 \`POST /checkout\`：第二次返回和第一次逐字节相同的响应体，且只有一笔订单
+- 不带 \`Idempotency-Key\` 的请求行为不变（回归）
+- \`npm test -- checkout\` 全绿
+`;
+
 /** A pending `can_use_tool`, so the permission sheet can be screenshotted. */
 const PERMISSION: any[] = [
   {
@@ -86,6 +130,28 @@ const PERMISSION: any[] = [
       subtype: 'can_use_tool', tool_name: 'Bash', tool_use_id: 'tu_perm',
       input: { command: 'rm -rf web/dist && cd web && npm run build', description: '重建前端产物' },
       permission_suggestions: [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm run build:*' }], behavior: 'allow', destination: 'session' }],
+    },
+  },
+];
+
+/**
+ * A session sitting in plan mode on an UNANSWERED ExitPlanMode ask — the state the corpus cannot
+ * show, because its plan is already approved. This is what puts the plan card's three buttons and
+ * the composer's plan-mode chip on screen at the same time.
+ */
+const PLAN_PENDING: any[] = [
+  { type: 'system', subtype: 'init', model: 'claude-opus-5', permissionMode: 'plan', cwd: '/srv/checkout', slash_commands: ['clear', 'compact'], skills: [] },
+  { type: 'user', timestamp: '2026-08-14T11:40:00.000Z', message: { role: 'user', content: '给结账流程加一个幂等键，先出个方案' } },
+  {
+    type: 'assistant', timestamp: '2026-08-14T11:40:20.000Z',
+    message: { role: 'assistant', model: 'claude-opus-5', content: [{ type: 'tool_use', id: 'tu_plan_prev', name: 'ExitPlanMode', input: { plan: PREVIEW_PLAN, planFilePath: '/home/dev/.claude/plans/idempotency-key.md' } }] },
+  },
+  {
+    type: 'control_request', request_id: 'rq_plan_preview',
+    request: {
+      subtype: 'can_use_tool', tool_name: 'ExitPlanMode', display_name: 'ExitPlanMode',
+      tool_use_id: 'tu_plan_prev', description: '', requires_user_interaction: true,
+      input: { plan: PREVIEW_PLAN, planFilePath: '/home/dev/.claude/plans/idempotency-key.md' },
     },
   },
 ];
@@ -134,7 +200,12 @@ export async function startPreview(opts: { port?: number; username?: string } = 
     ...PERMISSION,
   ]);
 
-  // 3) an offline session — the "claude 没有连着" banner and the dimmed list row
+  // 3) a session in plan mode with an unanswered plan — the plan card and the mode chip
+  const plan = await server.store.createReplSession(credential, { dir: '/srv/checkout', machineName: 'checkout-box' });
+  await goLive(plan.ingressToken, plan.id);
+  await post(server, plan.ingressToken, plan.id, PLAN_PENDING);
+
+  // 4) an offline session — the "claude 没有连着" banner and the dimmed list row
   const cold = await server.store.createReplSession(credential, { dir: '/home/racel/notes', machineName: 'thinkpad' });
   await post(server, cold.ingressToken, cold.id, [
     { type: 'user', timestamp: '2026-08-14T09:02:00.000Z', message: { role: 'user', content: '整理一下这周的会议记录' } },
@@ -156,6 +227,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
   const p = await startPreview({ port: Number(arg('--port') || 8791), username: arg('--username') });
   console.log(`ui-preview on http://127.0.0.1:${p.port}  credential=${p.credential}  chat=${p.chatId}`);
-  console.log('sessions: 1 live transcript · 1 awaiting approval · 1 offline');
+  console.log('sessions: 1 live transcript · 1 awaiting approval · 1 in plan mode · 1 offline');
   process.on('SIGINT', () => { p.close(); process.exit(0); });
 }

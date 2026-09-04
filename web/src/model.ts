@@ -21,7 +21,7 @@
  * free, and anything undecided is counted in `unhandled` and marked in the transcript.
  */
 import { takeVisibleUserTexts } from './transcript.ts';
-import { toolArg, HIDDEN_TOOLS, QUESTION_TOOL } from '../../src/tool-summary.ts';
+import { toolArg, HIDDEN_TOOLS, QUESTION_TOOL, PLAN_EXIT_TOOL, PLAN_ENTER_TOOL } from '../../src/tool-summary.ts';
 import { isPushNotificationToolUse } from '../../src/push-event.ts';
 import { imageAttachmentsOf, toolResultText, type ImageAttachment } from '../../src/image-blob.ts';
 import { shapeOf, verdictOf, unknownBlockTypes } from '../../src/wire-shape.ts';
@@ -76,6 +76,16 @@ export type Item =
   | { kind: 'tools'; id: number; calls: ToolCall[] }
   | { kind: 'todo'; id: number; tasks: TodoTask[] }
   | { kind: 'question'; id: number; requestId: string; toolUseId?: string; questions: Question[]; answered?: Msg }
+  /**
+   * ExitPlanMode's approval ask. It is a `can_use_tool` request like any other, but the wire marks
+   * it `requires_user_interaction:true` — the control schema's way of saying a one-tap Allow/Deny
+   * is the wrong surface — and its input carries the entire plan as markdown. A modal with a
+   * 400-char truncated command line is exactly what that flag forbids, so it renders inline, the
+   * way a question does. `outcome` is which button was pressed, kept so the settled card can say
+   * whether the plan was approved or sent back.
+   */
+  | { kind: 'plan'; id: number; requestId: string; toolUseId?: string; plan: string; planFilePath?: string;
+      answered?: Msg; outcome?: 'approved' | 'rejected' }
   // `detail`/`phases`/`tools`/`ms` come from system:task_progress, which the CLI emits while a
   // background task runs — without them a task card is a spinner with no news for minutes.
   // `interrupted` is not a CLI status: it is what a running task becomes when the worker goes
@@ -537,6 +547,15 @@ function assistant(d: Draft, p: any, ts: number | undefined, isHistory: boolean)
       if (!isHistory) d.live.thinking = false;
       if (isPushNotificationToolUse(b) || HIDDEN_TOOLS.has(b.name)) continue;
       if (b.name === QUESTION_TOOL) continue; // rendered as a question card from its permission request
+      if (b.name === PLAN_EXIT_TOOL) continue; // …and this one as a plan card, from the same place
+      if (b.name === PLAN_ENTER_TOOL) {
+        // Auto-approved and input-less, so there is no ask to render and nothing to put on a tool
+        // card — but the mode HAS changed, and every other signal for that (the re-sent
+        // `system:init`) is invisible. A line saying so is the only sign the transcript gets.
+        if (!isHistory) d.live.busy = true;
+        push(d, { kind: 'status', text: { k: 'plan.entered' } });
+        continue;
+      }
       const toolUseId = String(b.id ?? '');
       if (!toolUseId) continue;
       if (!isHistory) d.live.busy = true;
@@ -589,6 +608,21 @@ function user(d: Draft, p: any, ts: number | undefined, isHistory: boolean): Tra
 
       const q = d.items.findIndex((i) => i.kind === 'question' && i.toolUseId === id);
       if (q >= 0) { d.items[q] = { ...(d.items[q] as any), answered: body }; continue; }
+
+      const pl = d.items.findIndex((i) => i.kind === 'plan' && i.toolUseId === id);
+      if (pl >= 0) {
+        // Never the wire text: an approved plan comes back with the ENTIRE plan appended again
+        // ("## Approved Plan:\n…"), so echoing it under the card would print the plan twice. The
+        // outcome is all this line has to carry, and our own optimistic answer already set it
+        // when the tap happened here rather than in the terminal.
+        const prev = d.items[pl] as Extract<Item, { kind: 'plan' }>;
+        const outcome = prev.outcome ?? (b.is_error ? 'rejected' : 'approved');
+        d.items[pl] = {
+          ...prev, outcome,
+          answered: prev.answered ?? { k: outcome === 'approved' ? 'plan.approved' : 'plan.rejected' },
+        };
+        continue;
+      }
 
       const at = d.index[id];
       if (at && at.i < 0) { learnTodoId(d, id, body); continue; } // a Task* call
@@ -667,6 +701,18 @@ function controlRequest(d: Draft, p: any): TranscriptState {
     push(d, { kind: 'question', requestId, toolUseId, questions });
     return d;
   }
+  if (req.tool_name === PLAN_EXIT_TOOL) {
+    // `plan` is injected from the plan file by the CLI, so in practice it is always there — but a
+    // plan-less ask is still an ask, and dropping it would block the worker forever. Falling back
+    // to the generic sheet is the honest answer: it can at least be allowed or denied.
+    const plan = typeof req.input?.plan === 'string' ? req.input.plan : '';
+    if (plan.trim()) {
+      if (d.items.some((i) => i.kind === 'plan' && i.requestId === requestId)) return d;
+      const planFilePath = typeof req.input?.planFilePath === 'string' ? req.input.planFilePath : undefined;
+      push(d, { kind: 'plan', requestId, toolUseId, plan, planFilePath });
+      return d;
+    }
+  }
   if (toolUseId) patchCall(d, toolUseId, { status: 'awaiting' });
   d.live.permission = {
     requestId, toolUseId,
@@ -698,6 +744,8 @@ function controlCancel(d: Draft, p: any): TranscriptState {
   }
   const q = d.items.findIndex((i) => i.kind === 'question' && i.requestId === requestId && !i.answered);
   if (q >= 0) d.items[q] = { ...(d.items[q] as Extract<Item, { kind: 'question' }>), answered: { k: 'question.handledInTerminal' } };
+  const pl = d.items.findIndex((i) => i.kind === 'plan' && i.requestId === requestId && !i.answered);
+  if (pl >= 0) d.items[pl] = { ...(d.items[pl] as Extract<Item, { kind: 'plan' }>), answered: { k: 'question.handledInTerminal' } };
   return d;
 }
 
@@ -776,6 +824,19 @@ export function markQuestionAnswered(state: TranscriptState, requestId: string, 
   const d = draftOf(state);
   const at = d.items.findIndex((i) => i.kind === 'question' && i.requestId === requestId);
   if (at >= 0) d.items[at] = { ...(d.items[at] as any), answered: summary };
+  return d;
+}
+
+/** Fold our own plan verdict into the card, so it settles on the tap and not a round trip later. */
+export function markPlanAnswered(state: TranscriptState, requestId: string, outcome: 'approved' | 'rejected', summary: Msg): TranscriptState {
+  const d = draftOf(state);
+  const at = d.items.findIndex((i) => i.kind === 'plan' && i.requestId === requestId);
+  if (at >= 0) d.items[at] = { ...(d.items[at] as any), outcome, answered: summary };
+  // `permissionMode` is deliberately NOT touched. Approving does end plan mode, but it ends it at
+  // whatever the mode was BEFORE plan (the CLI restores `prePlanMode`), and that value is not on
+  // this wire — guessing "default" would be wrong for anyone who entered plan mode from
+  // acceptEdits. The worker re-sends `system:init` with the real mode within the same second
+  // (measured), and that is what moves the indicator.
   return d;
 }
 

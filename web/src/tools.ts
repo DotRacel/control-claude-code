@@ -7,11 +7,17 @@
  * `is_error` and the output text, never a numeric status. So a failed call shows the first line
  * of its actual error instead of an invented exit code.
  */
-import { toolDisplayName, toolArg, splitPath, argIsPath, HIDDEN_TOOLS, QUESTION_TOOL } from '../../src/tool-summary.ts';
+import {
+  toolDisplayName, toolArg, splitPath, argIsPath, HIDDEN_TOOLS, QUESTION_TOOL,
+  PLAN_EXIT_TOOL, PLAN_ENTER_TOOL,
+} from '../../src/tool-summary.ts';
 import type { ToolCall } from './model.ts';
 import type { Msg } from './i18n/msg.ts';
 
-export { toolDisplayName, toolArg, splitPath, argIsPath, HIDDEN_TOOLS, QUESTION_TOOL };
+export {
+  toolDisplayName, toolArg, splitPath, argIsPath, HIDDEN_TOOLS, QUESTION_TOOL,
+  PLAN_EXIT_TOOL, PLAN_ENTER_TOOL,
+};
 
 const firstLine = (s: string, max = 120): string => {
   const line = (s.split('\n').find((l) => l.trim()) ?? '').trim();
