@@ -72,6 +72,11 @@ const EXTRA: any[] = [
     type: 'assistant', timestamp: '2026-08-14T11:20:33.000Z',
     message: { role: 'assistant', model: 'claude-opus-5', content: [{ type: 'tool_use', id: 'tu_prev2', name: 'Read', input: { file_path: '/home/racel/claude-code-controller/web/src/components/Composer.tsx' } }] },
   },
+  // A background sub-agent's lifecycle: the card starts, then the completion arrives ONLY as the
+  // `<task-notification>` user echo claude injects — the card must settle to done and show the
+  // outcome line, never render the raw XML as a user bubble.
+  { type: 'system', subtype: 'task_started', task_id: 'prev_agent', task_type: 'local_agent', description: '审查 Composer 的移动端布局', tool_use_id: 'tu_prev2', timestamp: '2026-08-14T11:20:34.000Z' },
+  { type: 'user', timestamp: '2026-08-14T11:20:58.000Z', message: { role: 'user', content: '<task-notification>\n<task-id>prev_agent</task-id>\n<tool-use-id>tu_prev2</tool-use-id>\n<output-file>/tmp/tasks/prev_agent.output</output-file>\n<status>completed</status>\n<summary>Agent "审查 Composer 的移动端布局" finished</summary>\n<result>Composer 的高度分配没问题；建议给 textarea 加 max-height 与 env(safe-area-inset-bottom)。</result>\n<usage><subagent_tokens>8420</subagent_tokens><tool_uses>3</tool_uses><duration_ms>24180</duration_ms></usage>\n</task-notification>' } },
 ];
 
 /** Long enough to fold (the card folds past 900 chars), and mixed-script for the same reason the

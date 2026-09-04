@@ -245,6 +245,9 @@ export const ZH = {
   'bgtask.failed': '失败',
   'bgtask.interrupted': '已中断',
   'bgtask.done': '完成',
+  // The fork-source notice claude injects wrapped in <task-notification>: this session began as a
+  // copy of another that is still running. Shown as a faint status line, not a task card.
+  'task.forked': '本会话由另一个仍在运行的会话分叉而来',
 
   // ── a wire shape the transcript has no renderer for yet ──
   'unknown.title': '这条消息的格式还没有适配',
