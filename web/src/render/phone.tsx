@@ -380,27 +380,26 @@ function PlanCard({ it, cls, onAnswer }: {
       {answered
         ? <div className="qanswer">{t(it.answered!)}</div>
         : (
-          <>
-            <div className="qblock" style={{ paddingTop: 0 }}>
-              <input
-                className="qother" placeholder={t({ k: 'plan.feedback' })} value={feedback}
-                onChange={(e) => setFeedback(e.target.value)}
-              />
-            </div>
-            <div className="plan-actions">
-              <button className="btn primary tall" onClick={() => { haptic('light'); onAnswer(it, 'approve'); }}>
-                {t({ k: 'plan.approve' })}
-              </button>
-              <button className="btn tall" onClick={() => { haptic('light'); onAnswer(it, 'approve-accept-edits'); }}>
-                {t({ k: 'plan.approveAcceptEdits' })}
-              </button>
-              {/* Not `danger`: sending a plan back is the normal other half of reviewing one, not
-                  a destructive act — the session simply stays in plan mode and Claude revises. */}
-              <button className="btn tall" onClick={() => { haptic('medium'); onAnswer(it, 'reject', feedback.trim() || undefined); }}>
-                {t({ k: 'plan.keepPlanning' })}
-              </button>
-            </div>
-          </>
+          <div className="plan-actions">
+            <button className="btn primary tall" onClick={() => { haptic('light'); onAnswer(it, 'approve'); }}>
+              {t({ k: 'plan.approve' })}
+            </button>
+            <button className="btn tall" onClick={() => { haptic('light'); onAnswer(it, 'approve-accept-edits'); }}>
+              {t({ k: 'plan.approveAcceptEdits' })}
+            </button>
+            {/* The box sits directly above the button it feeds, and below the two it has nothing
+                to do with — above all three it read as if it applied to "Approve", which is the
+                one verdict that discards it. */}
+            <input
+              className="qother plan-feedback" placeholder={t({ k: 'plan.feedback' })} value={feedback}
+              onChange={(e) => setFeedback(e.target.value)}
+            />
+            {/* Not `danger`: sending a plan back is the normal other half of reviewing one, not
+                a destructive act — the session simply stays in plan mode and Claude revises. */}
+            <button className="btn tall" onClick={() => { haptic('medium'); onAnswer(it, 'reject', feedback.trim() || undefined); }}>
+              {t({ k: 'plan.keepPlanning' })}
+            </button>
+          </div>
         )}
     </div>
   );

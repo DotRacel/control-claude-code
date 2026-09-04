@@ -207,7 +207,9 @@ export const EN: Record<MsgKey, string> = {
   'plan.ready': "Claude's implementation plan",
   'plan.showFull': 'Show the full plan',
   'plan.foldPlan': 'Fold',
-  'plan.feedback': 'What should change? (optional, sent with “Keep planning”)',
+  // Short enough to survive a single-line input at 390px — the long form was cut mid-word, and
+  // the box now sits against the button it feeds, which says the rest.
+  'plan.feedback': 'What should change? (optional)',
   'plan.approve': 'Approve and start',
   'plan.approveAcceptEdits': 'Approve, auto-accept edits',
   'plan.keepPlanning': 'Keep planning',

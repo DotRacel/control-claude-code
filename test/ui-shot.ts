@@ -361,6 +361,17 @@ async function main() {
       },
     },
     {
+      // The settled state, from the corpus session: an approved plan keeps the plan on screen and
+      // says only what was decided — the tool_result's second copy of it is deliberately not here.
+      name: '06d-plan-card-answered',
+      setup: async (c) => {
+        await c.eval(`(() => { const b = [...document.querySelectorAll('.session-card')].find(e => e.textContent.includes('racel-dev')); b && b.click(); })()`);
+        await sleep(900);
+        await c.eval(`document.querySelector('.plancard.answered')?.scrollIntoView({ block: 'end' })`);
+        await sleep(300);
+      },
+    },
+    {
       name: '07-output-sheet',
       setup: async (c) => {
         await c.eval(`(() => { const b = [...document.querySelectorAll('.session-card')].find(e => e.textContent.includes('racel-dev')); b && b.click(); })()`);

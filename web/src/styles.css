@@ -650,6 +650,9 @@ textarea { font: inherit; }
 /* Stacked, not a row: the three verdicts have real labels ("Approve, auto-accept edits"), and
    side by side on a phone each one wraps to three lines of five-pixel gaps. */
 .plan-actions { display: flex; flex-direction: column; gap: 9px; padding: 0 13px 13px; }
+/* The feedback box lives INSIDE the button stack, directly above the button it feeds, so it
+   needs the stack's own width rather than .qother's own top margin. */
+.plan-feedback { margin-top: 4px; }
 .plancard .plan-actions .btn.tall { min-height: 48px; font-size: 15.5px; }
 
 /* ── banners (1g): under the header, never covering content ── */

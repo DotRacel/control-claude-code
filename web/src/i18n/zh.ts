@@ -220,7 +220,8 @@ export const ZH = {
   'plan.ready': 'Claude 的实现计划',
   'plan.showFull': '展开完整计划',
   'plan.foldPlan': '收起',
-  'plan.feedback': '想让它改什么？（选填，用于「继续规划」）',
+  // 位置已经说明了它服务于下面那个按钮，文案就不必再重复一遍。
+  'plan.feedback': '想让它改什么？（选填）',
   'plan.approve': '批准，开始实现',
   'plan.approveAcceptEdits': '批准，并自动接受编辑',
   'plan.keepPlanning': '继续规划',
