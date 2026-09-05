@@ -17,6 +17,7 @@ import { toolDisplayName } from '../src/tool-summary.ts';
 // shell it was run from. (web/src/i18n/index.ts imports no React — that is deliberate, so a
 // root-level Node script like this one can use it at all.)
 import { say } from '../web/src/i18n/index.ts';
+import { HEADLINE_MAX } from '../src/task-status.ts';
 
 const url = process.env.DATABASE_URL;
 if (!url) { console.error('DATABASE_URL is required'); process.exit(1); }
@@ -73,7 +74,19 @@ for (const it of state.items) {
   }
   if (it.kind === 'prose' && !it.text.trim()) problems.push('empty prose item');
   if (it.kind === 'user' && /^<(local-command|command-name|system-reminder)/.test(it.text)) problems.push(`synthetic user text rendered: ${it.text.slice(0, 40)}`);
+  // The other half of that blindness: a payload the harness generated, rendered as a turn. Nobody
+  // types 15 kilobytes, so the length alone is the tell — as is the marker's own wording.
+  if (it.kind === 'user' && it.text.length > 4000) problems.push(`user bubble of ${it.text.length} chars — a synthetic replay is being rendered as a turn`);
+  if (it.kind === 'user' && /^(This session is being continued|\[Request interrupted)/.test(it.text)) problems.push(`harness text rendered as a user turn: ${it.text.slice(0, 40)}`);
   if (it.kind === 'status' && say('en', it.text).startsWith('{')) problems.push('raw JSON in a status line');
+  // The smell this tool was blind to: every shape was `handled`, and a task card was still titled
+  // with a 30122-character subagent report. A card title is a line — anything longer means a
+  // summary reached a slot that cannot hold it.
+  if (it.kind === 'bgtask') {
+    const title = say('en', it.description);
+    if (title.length > HEADLINE_MAX + 1) problems.push(`bgtask title is ${title.length} chars — a report is being used as a label`);
+    if (title.includes('\n')) problems.push('bgtask title spans multiple lines');
+  }
 }
 console.log(`tool calls: ${calls} (${unthreaded} still open at the end)`);
 if (problems.length) { console.log('\n⚠ problems:'); for (const p of new Set(problems)) console.log('  -', p); }

@@ -20,7 +20,8 @@
  * payload is now gated on a declared verdict (src/wire-shape.ts): declared noise is dropped for
  * free, and anything undecided is counted in `unhandled` and marked in the transcript.
  */
-import { takeVisibleUserTexts } from './transcript.ts';
+import { takeVisibleUserTexts, slashCommandOf, localCommandOutputOf, interruptNoticeIn } from './transcript.ts';
+import { taskStateOf, headlineOf, hasReportBody } from '../../src/task-status.ts';
 import { toolArg, HIDDEN_TOOLS, QUESTION_TOOL, PLAN_EXIT_TOOL, PLAN_ENTER_TOOL } from '../../src/tool-summary.ts';
 import { isPushNotificationToolUse } from '../../src/push-event.ts';
 import { imageAttachmentsOf, toolResultText, type ImageAttachment } from '../../src/image-blob.ts';
@@ -94,7 +95,13 @@ export type Item =
       // `summary` is the human line the completion notification carries ('Agent "X" finished', a
       // failure reason, a Monitor event) — the point of a *finished* card, kept even when `detail`
       // (the last running step) is dropped. `description` is what task_started named it.
-      summary?: string; detail?: string; phases?: string[]; tools?: number; ms?: number }
+      //
+      // `report` is the rest of that summary when the notification carried a whole subagent
+      // report rather than a line (30122 characters of markdown, in the sampled history). It is
+      // NOT a duplicate of the Agent tool card: the tool_result for the same call is a different,
+      // much shorter text, so this is the only copy the transcript ever gets. `summary` holds its
+      // headline; the body renders behind a toggle.
+      summary?: string; report?: string; detail?: string; phases?: string[]; tools?: number; ms?: number }
   | { kind: 'status'; id: number; text: Msg }
   /** A hard break in the conversation: /clear, a compaction, the worker going away. */
   | { kind: 'divider'; id: number; label: Msg }
@@ -399,7 +406,10 @@ function system(d: Draft, p: any): TranscriptState {
       const done = str(p.compact_result);
       if (done) {
         d.live.compacting = false;
-        if (done !== 'success') push(d, { kind: 'error', title: { k: 'compact.failed' }, detail: done });
+        // `compact_error` says WHY and `compact_result` only says "failed" — the one failure in the
+        // sampled history carried `{compact_result:'failed', compact_error:'aborted'}`, and the
+        // card showed the word that adds nothing. Prefer the reason when the payload gives one.
+        if (done !== 'success') push(d, { kind: 'error', title: { k: 'compact.failed' }, detail: str(p.compact_error) ?? done });
         return d;
       }
       // Any other notice under this subtype. Declaring `system:status` handled must not silently
@@ -431,14 +441,38 @@ function system(d: Draft, p: any): TranscriptState {
     }
     case 'task_notification': {
       const taskId = String(p.task_id ?? '');
-      const status = p.status === 'failed' ? 'failed' : 'completed';
-      const summary = p.summary ? String(p.summary) : undefined;
+      // A notification IS the task ending, so `running` is not a possible reading of its status —
+      // and an unrecognised word must not become 完成. It is filed as backlog and falls back to
+      // `interrupted`, which is this union's "it stopped, we cannot say cleanly how" bucket (see
+      // the note on the Item type) and therefore the weakest claim available.
+      const known = taskStateOf(p.status);
+      if (!known) noteUnknown(d, `system:task_notification:${str(p.status) ?? '?'}`);
+      const status: 'completed' | 'failed' | 'interrupted' =
+        known === 'completed' || known === 'failed' || known === 'interrupted' ? known : 'interrupted';
+      const outcome = splitSummary(p.summary);
+      const usage = taskUsage(p.usage);
       const at = d.items.findIndex((i) => i.kind === 'bgtask' && i.taskId === taskId);
       // The card already names the task (from task_started); the notification's summary is the
       // *outcome* line, so add it alongside. Creating a card from the notification alone, there is
       // nothing else to show, so the summary becomes the description — not also a duplicate line.
-      if (at >= 0) { const it = d.items[at] as Extract<Item, { kind: 'bgtask' }>; d.items[at] = { ...it, status, summary: summary ?? it.summary }; }
-      else if (taskId) push(d, { kind: 'bgtask', taskId, description: summary ?? { k: 'bgtask.untitled' }, status });
+      // Either way `description` gets the HEADLINE, never the raw summary: for a subagent that
+      // string is the whole report, and it used to render as an unclipped card title.
+      if (at >= 0) {
+        const it = d.items[at] as Extract<Item, { kind: 'bgtask' }>;
+        d.items[at] = { ...it, status, summary: outcome.summary ?? it.summary, report: outcome.report ?? it.report, ...usage };
+      } else if (taskId) {
+        // The Agent call's own label first; the summary headline only when there is no such call
+        // (a Bash background task, whose summary IS a one-line label).
+        const named = agentDescriptionOf(d, p.tool_use_id);
+        push(d, {
+          kind: 'bgtask', taskId, status, ...usage,
+          description: named ?? outcome.summary ?? { k: 'bgtask.untitled' },
+          // With a real name on the card, the headline is no longer the title, so it goes back to
+          // being the outcome line it always was.
+          summary: named ? outcome.summary : undefined,
+          report: outcome.report,
+        });
+      }
       return d;
     }
     case 'background_tasks_changed': {
@@ -477,7 +511,11 @@ function system(d: Draft, p: any): TranscriptState {
       const status = p.patch?.status;
       const at = d.items.findIndex((i) => i.kind === 'bgtask' && i.taskId === taskId);
       if (!taskId || at < 0 || typeof status !== 'string') return d;
-      const next = status === 'failed' ? 'failed' : status === 'completed' ? 'completed' : 'running';
+      // Anything not recognised used to fold into `running`, which is how a `killed` patch left
+      // its card spinning for the rest of the transcript. An undecided word is backlog, and the
+      // card is left exactly as it was rather than being talked into a state by a default.
+      const next = taskStateOf(status);
+      if (!next) { noteUnknown(d, `system:task_updated:${status}`); return d; }
       d.items[at] = { ...(d.items[at] as Extract<Item, { kind: 'bgtask' }>), status: next };
       return d;
     }
@@ -589,6 +627,60 @@ function settleQueued(d: Draft, text: string): void {
 }
 
 /**
+ * A completion summary split into the line a card can title itself with and the body behind it.
+ *
+ * The wire makes no distinction: `summary` is "Run quarkusBuild to validate CDI wiring" for a Bash
+ * task and the subagent's entire final report for an Agent — 30122 characters in the sampled
+ * history, and 7 of 35 task cards were titled with one. `report` is set only when there is more
+ * than the headline, so a genuinely one-line summary never grows a "show the report" affordance.
+ */
+function splitSummary(raw: unknown): { summary?: string; report?: string } {
+  const s = typeof raw === 'string' ? raw.trim() : '';
+  if (!s) return {};
+  const summary = headlineOf(s);
+  if (!summary) return {};
+  return hasReportBody(s) ? { summary, report: s } : { summary };
+}
+
+/**
+ * The name the spawning `Agent` call gave this task, found through the notification's own
+ * `tool_use_id`.
+ *
+ * A notification that arrives without a preceding `task_started` has nothing to title its card
+ * with but the summary — which for a subagent is its report, so the card ended up called
+ * "## Answer" or "Findings below.". The tool call that started it is already on screen two items
+ * up and carries a real label ("Determine RESTEasy route priority"), so use that instead: same
+ * data, already in the transcript, and it is what the terminal calls the task too.
+ */
+function agentDescriptionOf(d: Draft, toolUseId: unknown): string | undefined {
+  if (typeof toolUseId !== 'string' || !toolUseId) return undefined;
+  const at = d.index[toolUseId];
+  if (!at || at.i < 0) return undefined;
+  const group = d.items[at.i];
+  if (group?.kind !== 'tools') return undefined;
+  const desc = group.calls[at.j]?.input?.description;
+  return typeof desc === 'string' && desc.trim() ? desc.trim() : undefined;
+}
+
+/**
+ * `tool_uses` / `duration_ms` off a task payload's `usage`.
+ *
+ * Read here as well as in `task_progress` because the two do not always both arrive: a task that
+ * finishes without ever emitting a progress frame carried its only counts on the notification,
+ * and those were dropped — the card said `Background task · 完成` with nothing else, while the
+ * payload beside it held `{tool_uses: 21, duration_ms: 148758}`.
+ */
+function taskUsage(usage: unknown): { tools?: number; ms?: number } {
+  const u = usage as any;
+  const out: { tools?: number; ms?: number } = {};
+  // Number.isFinite, not typeof: the text form's counts come from a regex that may not have
+  // matched, and `Number(undefined)` is a NaN which is very much `typeof 'number'`.
+  if (Number.isFinite(u?.tool_uses)) out.tools = u.tool_uses;
+  if (Number.isFinite(u?.duration_ms)) out.ms = u.duration_ms;
+  return out;
+}
+
+/**
  * A `<task-notification>` echo — the queued command claude injects when a background task finishes,
  * arriving as a `user` message whose text IS the raw XML. Never a bubble (the official client never
  * shows it as a turn): parse it into card updates instead. Covers agent/command completions, the
@@ -611,14 +703,40 @@ function taskNotification(d: Draft, raw: string): TranscriptState {
     return d;
   }
 
-  const status: 'completed' | 'failed' | 'interrupted' = tag === 'failed' ? 'failed' : tag === 'stopped' ? 'interrupted' : 'completed';
+  // Same vocabulary as the structured payloads, and the same reason for sharing it: this form
+  // spells the stop `killed` where `system:task_notification` spells it `stopped`, and the old
+  // two-word ladder here recognised only the latter — so the one task a user actually stopped
+  // was labelled 完成 above a summary reading `Agent "…" was stopped by user`.
+  const known = taskStateOf(tag);
+  if (!known) noteUnknown(d, `task-notification:${tag}`);
+  const status: 'completed' | 'failed' | 'interrupted' =
+    known === 'completed' || known === 'failed' || known === 'interrupted' ? known : 'interrupted';
+  // The report body lives in `<result>` in this form (it is `summary` in the structured one), and
+  // was read by nobody — so the agent's answer reached the transcript through neither.
+  const report = decode(/<result>([\s\S]*?)<\/result>/.exec(raw)?.[1] ?? '');
+  const usage = taskUsage({
+    tool_uses: Number(/<tool_uses>\s*(\d+)\s*<\/tool_uses>/.exec(raw)?.[1]),
+    duration_ms: Number(/<duration_ms>\s*(\d+)\s*<\/duration_ms>/.exec(raw)?.[1]),
+  });
+  const head = summary ? headlineOf(summary) : '';
+  const body = report && report !== head ? report : undefined;
   // `__orphan_summary__:*` ids are the scanner's internal markers, not tasks (the message says so).
   const ids = [...raw.matchAll(/<task-id>([^<]+)<\/task-id>/g)].map((m) => m[1].trim()).filter((id) => id && !id.startsWith('__orphan_summary__'));
-  if (ids.length === 0) { if (summary) push(d, { kind: 'status', text: summary }); return d; }
+  if (ids.length === 0) { if (head) push(d, { kind: 'status', text: head }); return d; }
   for (const taskId of ids) {
     const at = d.items.findIndex((i) => i.kind === 'bgtask' && i.taskId === taskId);
-    if (at >= 0) { const it = d.items[at] as Extract<Item, { kind: 'bgtask' }>; d.items[at] = { ...it, status, summary: summary || it.summary }; }
-    else push(d, { kind: 'bgtask', taskId, description: summary || { k: 'bgtask.untitled' }, status });
+    if (at >= 0) { const it = d.items[at] as Extract<Item, { kind: 'bgtask' }>; d.items[at] = { ...it, status, summary: head || it.summary, report: body ?? it.report, ...usage }; }
+    else {
+      // Same preference as the structured branch: the spawning Agent call's own label beats the
+      // summary line, and this form carries the id to find it by as `<tool-use-id>`.
+      const named = agentDescriptionOf(d, /<tool-use-id>([^<]+)<\/tool-use-id>/.exec(raw)?.[1]?.trim());
+      push(d, {
+        kind: 'bgtask', taskId, status, ...usage,
+        description: named ?? head ?? { k: 'bgtask.untitled' },
+        summary: named ? head || undefined : undefined,
+        report: body,
+      });
+    }
   }
   return d;
 }
@@ -626,6 +744,19 @@ function taskNotification(d: Draft, raw: string): TranscriptState {
 function user(d: Draft, p: any, ts: number | undefined, isHistory: boolean): TranscriptState {
   const content = p?.message?.content;
   if (typeof content === 'string' && /^\s*<task-notification>/.test(content)) return taskNotification(d, content);
+  if (typeof content === 'string') {
+    const cmd = slashCommandOf(content);
+    if (cmd) return slashCommand(d, cmd);
+    const out = localCommandOutputOf(content);
+    if (out) { push(d, { kind: 'status', text: out }); return d; }
+  }
+  // Pressing Escape is a beat, but it is not a turn: the marker arrives as an ordinary text block
+  // with nothing on the envelope to distinguish it, so it used to render as a bubble reading
+  // `[Request interrupted by user]` — a sentence attributed to someone who typed nothing.
+  // The turn state is deliberately left alone: in the sampled history the marker always lands
+  // AFTER the `result` that already wound the turn down, and settling tool cards from here would
+  // mark a call that was genuinely cut off as having succeeded.
+  if (interruptNoticeIn(p)) { push(d, { kind: 'status', text: { k: 'status.interrupted' } }); return d; }
   const taken = takeVisibleUserTexts(p, d.pendingWeb, isHistory);
   d.pendingWeb = taken.pendingWeb;
   for (const text of taken.consumed) settleQueued(d, text);
@@ -789,6 +920,27 @@ function controlCancel(d: Draft, p: any): TranscriptState {
   if (q >= 0) d.items[q] = { ...(d.items[q] as Extract<Item, { kind: 'question' }>), answered: { k: 'question.handledInTerminal' } };
   const pl = d.items.findIndex((i) => i.kind === 'plan' && i.requestId === requestId && !i.answered);
   if (pl >= 0) d.items[pl] = { ...(d.items[pl] as Extract<Item, { kind: 'plan' }>), answered: { k: 'question.handledInTerminal' } };
+  return d;
+}
+
+/**
+ * A slash command the owner ran in the terminal, as a transcript beat.
+ *
+ * The wrapper tags are hidden from the bubbles on the grounds that no official client renders
+ * THEM — but the terminal does render the command, and the web client rendered nothing at all,
+ * so a remote viewer watching `/model claude-fable-5-1` saw the model change with no sign of why.
+ * It is a status line rather than a user bubble because the owner did not say it to the model.
+ *
+ * `/clear` is the exception, and only when it landed: it already arrives as `conversation_reset`,
+ * which draws a divider two events earlier, so repeating it here would double the beat. When that
+ * reset is missing the line is drawn — in the sampled history one `/clear` produced no reset at
+ * all, and that break was invisible in the transcript.
+ */
+function slashCommand(d: Draft, cmd: { name: string; args?: string }): TranscriptState {
+  const last = d.items[d.items.length - 1];
+  const afterReset = last?.kind === 'divider' && typeof last.label === 'object' && last.label.k === 'divider.reset';
+  if (afterReset && !cmd.args) return d;
+  push(d, { kind: 'status', text: { k: 'status.command', p: { cmd: cmd.args ? `${cmd.name} ${cmd.args}` : cmd.name } } });
   return d;
 }
 

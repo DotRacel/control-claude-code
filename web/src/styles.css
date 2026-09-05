@@ -547,15 +547,27 @@ textarea { font: inherit; }
 .todo-item.done span { color: var(--muted); text-decoration: line-through; }
 
 /* background task card (system:task_* — not in the design doc, our data has it) */
-.bgtask { border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--raised); padding: 12px 13px; display: flex; align-items: center; gap: 10px; }
+.bgtask { border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--raised); padding: 12px 13px; }
 .bgtask.failed { border-color: rgba(224, 122, 95, .28); }
+/* the dot + text line. Its own row since a card may now carry a report block underneath, and the
+   dot belongs beside the title rather than centred against the whole expanded card. */
+.bgtask-row { display: flex; align-items: center; gap: 10px; }
 .bgtask-text { flex: 1; min-width: 0; }
-.bgtask-text .t1 { font: 600 13.5px/1.3 var(--sans); }
+/* Two lines, then ellipsis. The reducer already reduces a summary to its headline, so this is the
+   backstop for the case that produced the bug: a completion notification whose `summary` was an
+   entire 30k-character subagent report, rendered as the card's unclipped title. */
+.bgtask-text .t1 { font: 600 13.5px/1.3 var(--sans); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
 .bgtask-text .t2 { margin-top: 3px; font: 400 11.5px/1.3 var(--mono); color: var(--muted); }
 /* the current step, from system:task_progress — clipped rather than wrapped, so a long agent
    label cannot grow the card to three lines on a phone */
 .bgtask-text .t3 { margin-top: 3px; font: 400 11.5px/1.3 var(--mono); color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bgtask-text .t3.phases { color: var(--muted); }
+/* the collapsed subagent report: a quiet toggle, then the markdown body in a scroll box of its
+   own so a long report cannot make the transcript item taller than the screen. */
+.bgtask-report-head { margin-top: 9px; padding: 0; border: 0; background: none; color: var(--accent); font: 400 11.5px/1.3 var(--mono); cursor: pointer; }
+.bgtask-report { margin-top: 8px; padding-top: 9px; border-top: 1px solid var(--line); max-height: 320px; overflow-y: auto; overscroll-behavior: contain; }
+.bgtask-report > :first-child { margin-top: 0; }
+.bgtask-report > :last-child { margin-bottom: 0; }
 
 /* images a tool returned. The bytes are NOT in the transcript: the placeholder is a button that
    fetches from /v1/blob on tap (see src/image-blob.ts for why). */

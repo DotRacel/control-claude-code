@@ -232,6 +232,8 @@ export const EN: Record<MsgKey, string> = {
   'bgtask.failed': 'Failed',
   'bgtask.interrupted': 'Interrupted',
   'bgtask.done': 'Done',
+  'bgtask.report': 'Show report',
+  'bgtask.hideReport': 'Hide report',
   'task.forked': 'This session was forked from another that is still running',
 
   // ── unrendered wire shape ──
@@ -249,6 +251,8 @@ export const EN: Record<MsgKey, string> = {
   'compact.failed': 'Compaction failed',
 
   // ── status lines ──
+  'status.command': '{cmd}',
+  'status.interrupted': 'Interrupted by user',
   'status.committed': 'Committed',
   'status.pushed': 'Pushed',
   'status.vcs': '{label}{branch}',

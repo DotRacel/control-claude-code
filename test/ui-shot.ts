@@ -435,6 +435,45 @@ async function main() {
       },
     },
     {
+      // The four adaptations driven off the production census (test/task-adaptation.test.ts).
+      // Collapsed first: the point of the card is that a 900-line sub-agent report does NOT
+      // arrive as its title, so this shot has to show a card that is still one line tall.
+      name: '16-task-report',
+      setup: async (c) => {
+        await c.eval(`(() => { const b = [...document.querySelectorAll('.session-card')].find(e => e.textContent.includes('racel-dev')); b && b.click(); })()`);
+        await sleep(900);
+        await c.eval(`(() => { const el = [...document.querySelectorAll('.bgtask')].find(e => e.querySelector('.bgtask-report-head')); el && el.scrollIntoView({ block: 'center' }); })()`);
+        await sleep(300);
+      },
+    },
+    {
+      // …and expanded, because the report is the transcript's ONLY copy of that text (the Agent
+      // tool_result is a different, shorter string) — so it has to be reachable, not just hidden.
+      name: '16b-task-report-open',
+      setup: async (c) => {
+        await c.eval(`(() => { const b = [...document.querySelectorAll('.session-card')].find(e => e.textContent.includes('racel-dev')); b && b.click(); })()`);
+        await sleep(900);
+        // The LONG one specifically: the short report proves nothing about the scroll box or the
+        // markdown inside it, and the long one is the case that produced the bug.
+        await c.eval(`(() => { const el = [...document.querySelectorAll('.bgtask')].find(e => e.textContent.includes('排查登录态丢失')); el && el.querySelector('.bgtask-report-head').click(); el && el.scrollIntoView({ block: 'start' }); })()`);
+        await sleep(400);
+      },
+    },
+    {
+      // The transcript tail, in ONE frame: both spellings of a stop (`stopped` on the notification,
+      // `killed` on the patch), the slash command that used to render nothing, the interrupt notice
+      // that used to be a bubble, and the compaction divider with a real turn after it — where a
+      // 32809-character `isSynthetic` replay used to sit. One frame because it can only be one: the
+      // scroller is already at its maximum here, so no scroll target separates these beats.
+      name: '17-stops-commands-and-compaction',
+      setup: async (c) => {
+        await c.eval(`(() => { const b = [...document.querySelectorAll('.session-card')].find(e => e.textContent.includes('racel-dev')); b && b.click(); })()`);
+        await sleep(900);
+        await c.eval(`(() => { const s = document.querySelector('.scroll.chat'); s.scrollTop = s.scrollHeight; })()`);
+        await sleep(300);
+      },
+    },
+    {
       // ⌘K has no phone counterpart, so on a phone this would just re-shoot the chat.
       name: '15-session-switcher',
       only: ['desktop'],

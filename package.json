@@ -46,7 +46,7 @@
     "db:up": "docker compose up -d db",
     "db:down": "docker compose down",
     "db:psql": "docker compose exec db psql -U ccc -d ccc",
-    "test": "node --test test/protocol.test.ts test/server.test.ts test/auth.test.ts test/fixtures.test.ts test/transcript.test.ts test/model.test.ts test/web-channel.test.ts test/pwa.test.ts test/push-event.test.ts test/control-cli.test.ts test/db.test.ts test/profiles.test.ts test/update-check.test.ts test/qr.test.ts test/deeplink.test.ts test/i18n.test.ts test/task-notification.test.ts",
+    "test": "node --test test/protocol.test.ts test/server.test.ts test/auth.test.ts test/fixtures.test.ts test/transcript.test.ts test/model.test.ts test/web-channel.test.ts test/pwa.test.ts test/push-event.test.ts test/control-cli.test.ts test/db.test.ts test/profiles.test.ts test/update-check.test.ts test/qr.test.ts test/deeplink.test.ts test/i18n.test.ts test/task-notification.test.ts test/task-adaptation.test.ts",
     "export-history": "bash scripts/export-history.sh",
     "history-audit": "node test/history-audit.ts",
     "shape-report": "node test/shape-report.ts",

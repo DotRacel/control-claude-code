@@ -9,7 +9,8 @@
  * session-list digest must hide exactly the same synthetic messages; re-exported here so
  * the web (and test/transcript.test.ts) keeps one import site.
  */
-export { cleanUserText, userTextsFrom } from '../../src/transcript-text.ts';
+export { cleanUserText, userTextsFrom, slashCommandOf, localCommandOutputOf, interruptNoticeIn } from '../../src/transcript-text.ts';
+export type { SlashCommand } from '../../src/transcript-text.ts';
 import { userTextsFrom } from '../../src/transcript-text.ts';
 
 /**

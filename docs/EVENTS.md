@@ -69,10 +69,29 @@ decides ownership.
   usage:{tool_uses,duration_ms,total_tokens}, last_tool_name,
   workflow_progress:[{type:"workflow_phase",index,title}]}`) · `task_updated` ✓
   (`{task_id, patch:{status,end_time}}`) · `task_notification` ✓ (`{task_id, status, summary,
-  output_file, usage}`) · `task_summary` ○ — background-task lifecycle.
+  output_file, tool_use_id, usage}`) · `task_summary` ○ — background-task lifecycle.
   Two things a client has to get right: between `task_started` and the notification, a long
   workflow reports **only** through `task_progress` (a card with no progress is a spinner for
   minutes), and `task_updated` can be the **only** event that says a task finished.
+
+  **The three producers do not share a status vocabulary.** One user pressing stop, in one
+  session, produced `task_updated.patch.status:"killed"`, `task_notification.status:"stopped"`,
+  and `<status>killed</status>` in the `<task-notification>` text echo. `completed` and `failed`
+  are the only words all three agree on, so a client that maps its own subset and lets the rest
+  fall through to a default WILL mislabel a stop — ours reported 完成 above a summary reading
+  `Agent "…" was stopped by user`. Map them in one table (`src/task-status.ts`) and file an
+  unrecognised word as backlog rather than guessing.
+
+  **`summary` is not a label.** For a `local_bash` task it is one line ("Run quarkusBuild to
+  validate CDI wiring"); for a `local_agent` it is the subagent's ENTIRE final report — 30122
+  characters of markdown in a 5006-event history, and 7 of 35 task cards were titled with one.
+  It is also not a duplicate of anything: the Agent `tool_result` for the same `tool_use_id` is a
+  different, much shorter text (1100 vs 7794 chars in one sampled pair), so the notification is
+  the only place that report exists. Take a headline for the card, keep the body behind a toggle,
+  and prefer the spawning Agent call's own `description` (found via `tool_use_id`) as the title.
+
+  `usage` on the notification is the same shape as `task_progress`'s and is often the ONLY copy:
+  a task that finished without ever emitting a progress frame carried its counts here alone.
 - `thinking` ○ · `thinking_tokens` ✓ (`{estimated_tokens, estimated_tokens_delta}`) — reasoning progress.
 - `notification` ○ · `os_notification` ○ · `informational` ○ — surfaced notices.
 - `status` ✓ — the same notices group, but the only use observed on the wire is compaction, as a
@@ -81,6 +100,9 @@ decides ownership.
   compaction runs for **minutes** (228s at the top of the sampled range) with no tool open and no
   reasoning, so nothing else accounts for the wait. Because the subtype is generic, a client must
   not treat "handled" as a wildcard here: an unrecognised notice belongs in the backlog.
+  A failure carries `compact_error` alongside the result — `{compact_result:"failed",
+  compact_error:"aborted"}` — and that is the field worth putting on screen; `compact_result` only
+  ever repeats the word "failed".
 - `api_error` ○ · `api_retry` ○ · `permission_denied` ○ · `permission_retry` ○ — error/retry.
 - `vcs_state_changed` ✓ — `{kind:"commit"|"push", branch, cwd}`; emitted after the agent commits
   or pushes. The one side effect a reader cannot undo by reading further, so it is worth a line.
@@ -122,6 +144,29 @@ calls; `thinking` blocks are reasoning.
 ```
 `isReplay:true` messages are the worker echoing turns into the transcript (including our own sends
 and tool results). Match `tool_result.tool_use_id` back to the `assistant` tool_use.
+
+**Far more `user` payloads are the harness talking than are turns, and the flag that marks them
+has moved.** In a 5006-event production history (claude 2.1.26x) `isMeta` and `isCompactSummary`
+— the two flags this project filtered on — appeared on **zero** payloads, while `isSynthetic:true`
+appeared on 23: the 8 `<local-command-caveat>` wrappers, and 15 post-compaction replays reading
+`"This session is being continued from a previous conversation…"` at 15628–32809 characters each.
+Every one of those 15 rendered as a user bubble. They need no rendering of their own: each lands
+directly after its own `compact_boundary`, which already draws the break.
+
+Three more `user` shapes carry no envelope flag at all and have to be recognised by content:
+
+- `<command-name>/model</command-name>` + `<command-message>` + `<command-args>`, then a separate
+  `<local-command-stdout>` with what the command printed. Hiding the WRAPPER is right; hiding the
+  event is not — the terminal shows `> /model` and its output, and a remote viewer otherwise sees
+  the model change with nothing on screen to say why. `/clear` is the exception: it also arrives
+  as `conversation_reset`, whose divider is the beat (though one `/clear` in that history came
+  with no reset at all, and was invisible).
+- `[Request interrupted by user]` — a plain text block. Nobody typed it, so it is a notice, not a
+  turn. It lands AFTER the `result` that already wound the turn down, so it must not settle tool
+  cards of its own accord.
+- `<task-notification>…</task-notification>` as the whole message text — the queued command claude
+  injects when a background task ends. Its report body is in `<result>`, its counts in
+  `<usage><tool_uses>/<duration_ms>`, and its status word is the `killed` spelling described above.
 
 **`tool_result.content` is not always a string.** A `Read` of an image returns
 `[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"…"}}]` — one

@@ -128,6 +128,7 @@ function ThinkingView({ it, cls }: { it: Extract<Item, { kind: 'thinking' }>; cl
  * `task_started` and its notification — so the card shows the current step, not just a spinner.
  */
 function BgTaskCard({ it, cls }: { it: Extract<Item, { kind: 'bgtask' }>; cls?: string }) {
+  const [openReport, setOpenReport] = useState(false);
   const running = it.status === 'running';
   const state = running ? t({ k: 'bgtask.running' })
     : it.status === 'failed' ? t({ k: 'bgtask.failed' })
@@ -139,21 +140,33 @@ function BgTaskCard({ it, cls }: { it: Extract<Item, { kind: 'bgtask' }>; cls?: 
   const bits = [state, durationLabel(it.ms), tools].filter(Boolean);
   return (
     <div className={`bgtask${it.status === 'failed' ? ' failed' : ''} ${cls ?? ''}`}>
-      <span className={`dot ${running ? 'run' : it.status === 'completed' ? 'on' : 'off'}`} />
-      <div className="bgtask-text">
-        <div className="t1">{t(it.description)}</div>
-        <div className="t2">{t({ k: 'bgtask.label' })} · {bits.join(' · ')}</div>
-        {/* The completion notification's outcome line ('Agent "X" finished', a failure reason). The
-            point of a finished card, so it stays for every terminal state — including completed,
-            where `detail` (the last running step) is dropped as stale. */}
-        {!running && it.summary && it.summary !== t(it.description) && <div className="t3">{it.summary}</div>}
-        {/* Where it got to. Dropped once a task completes (the step it ended on says nothing then),
-            but kept for one that failed or was interrupted — that IS the useful part. */}
-        {it.status !== 'completed' && it.detail && <div className="t3">{it.detail}</div>}
-        {it.status !== 'completed' && it.phases && it.phases.length > 0 && (
-          <div className="t3 phases">{it.phases.join(' › ')}</div>
-        )}
+      <div className="bgtask-row">
+        <span className={`dot ${running ? 'run' : it.status === 'completed' ? 'on' : 'off'}`} />
+        <div className="bgtask-text">
+          <div className="t1">{t(it.description)}</div>
+          <div className="t2">{t({ k: 'bgtask.label' })} · {bits.join(' · ')}</div>
+          {/* The completion notification's outcome line ('Agent "X" finished', a failure reason). The
+              point of a finished card, so it stays for every terminal state — including completed,
+              where `detail` (the last running step) is dropped as stale. */}
+          {!running && it.summary && it.summary !== t(it.description) && <div className="t3">{it.summary}</div>}
+          {/* Where it got to. Dropped once a task completes (the step it ended on says nothing then),
+              but kept for one that failed or was interrupted — that IS the useful part. */}
+          {it.status !== 'completed' && it.detail && <div className="t3">{it.detail}</div>}
+          {it.status !== 'completed' && it.phases && it.phases.length > 0 && (
+            <div className="t3 phases">{it.phases.join(' › ')}</div>
+          )}
+        </div>
       </div>
+      {/* A subagent's final report. It is not on the Agent tool card — that tool_result is a
+          different, much shorter text — so this is the transcript's only copy, and it used to
+          arrive as the card's own title, unclipped and thousands of lines long. Collapsed by
+          default, the same bargain ThinkingView strikes for a long reasoning block. */}
+      {it.report && (
+        <button className="bgtask-report-head" onClick={() => setOpenReport(!openReport)} aria-expanded={openReport}>
+          {t({ k: openReport ? 'bgtask.hideReport' : 'bgtask.report' })}
+        </button>
+      )}
+      {it.report && openReport && <div className="bgtask-report md">{renderMarkdown(it.report)}</div>}
     </div>
   );
 }
