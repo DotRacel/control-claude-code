@@ -1,6 +1,6 @@
 {
   "name": "control-claude-code",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "type": "module",
   "description": "Revive Claude Code Remote Control for BYOK users by injecting the Bun-compiled binary via inspector and re-hosting the /remote-control control-plane on a self-run server.",
   "keywords": [
