@@ -428,6 +428,26 @@ const LOCATOR_PRELUDE = `
           __find.set(needle, hit);
           return hit;
         }
+
+        /**
+         * Like findSource, but walks EVERY occurrence in every source and returns the first one
+         * \`accept(s, idx)\` approves — for an anchor that is not unique.
+         *
+         * Which chunk gets looked at first is readdir order, and no claude release owes us that
+         * order: 2.1.263 grew a second \`("--sdk-url")\` in an argv helper that happens to be listed
+         * before the guard's own chunk, so first-hit semantics silently pointed the locator at the
+         * wrong function. Discriminate on the code AROUND the hit, never on which one comes first.
+         */
+        function findSourceWhere(needle, accept){
+          var names = sourceNames();
+          for (var i = 0; i < names.length; i++) {
+            var t = peek(names[i]);
+            for (var k = t.indexOf(needle); k >= 0; k = t.indexOf(needle, k + needle.length)) {
+              if (accept(t, k)) { __text[names[i]] = t; return { url: names[i], s: t, idx: k }; }
+            }
+          }
+          return null;
+        }
 `;
 
 /**
@@ -457,15 +477,29 @@ export function buildChildLocatorExpr(globalKey: string): string {
         var MAIN = Bun.main;
         ${LOCATOR_PRELUDE}
         var out = { main: MAIN };
-        // dHs name: locate uHs("--sdk-url"), walk back to the enclosing function name.
-        var sd = findSource('("--sdk-url")');
-        out.sdkUrlIdx = sd ? sd.idx : -1;
+        // dHs name: locate the allowlist getter's own \`("--sdk-url")\` read, walk back to the
+        // enclosing function name.
+        //
+        // The flag string is NOT a unique anchor — 2.1.263 also spells it inside an argv helper
+        // (\`o=l3t((s)=>s.startsWith("--sdk-url"),t)\`, the is-this-print-mode check) which lands in
+        // an earlier-listed chunk, so taking the first hit walked back into a parameterised helper
+        // and yielded dHs=null. Both halves of \`accept\` describe the getter and nothing else: it
+        // takes no arguments (it reads process.argv itself), and it answers with the {status,url}
+        // verdict that childDhsRebind below impersonates.
+        //
+        // One regex, used to both pick the hit and read the name off it, so the accepted function
+        // and the reported dHs can never be two different things.
         // NB: minified names can contain '$' (e.g. dHs = "l$s"), so match [\\w$]+ not \\w+.
+        var DECL = /function ([\\w$]+)\\(\\)\\{[^{}]*$/;
+        var declBefore = function(s, k){ return s.slice(k < 200 ? 0 : k - 200, k); };
+        var sd = findSourceWhere('("--sdk-url")', function(s, k){
+          return DECL.test(declBefore(s, k)) && /\\{status:/.test(s.slice(k, k + 300));
+        });
+        out.sdkUrlIdx = sd ? sd.idx : -1;
         if (sd) {
           out.file = sd.url;
           out.total_lines = totalLines(sd.url);
-          var b1 = sd.s.slice(sd.idx - 200, sd.idx);
-          var mm = /function ([\\w$]+)\\(\\)\\{[^{}]*$/.exec(b1);
+          var mm = DECL.exec(declBefore(sd.s, sd.idx));
           out.dHs = mm ? mm[1] : null;
         } else { out.dHs = null; out.total_lines = totalLines(MAIN); }
         // The reject site: \`let n=sd(Se);if(n!==null)\` right before the reject telemetry.

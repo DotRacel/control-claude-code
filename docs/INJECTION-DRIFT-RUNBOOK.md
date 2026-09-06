@@ -172,6 +172,12 @@ clean. A `GateSpec` is four things:
 
 **Alias-regex tips**
 - Minified names can contain `$` — always `[\w$]+`, never `\w+`.
+- **Check the anchor is unique before you trust the first hit.** `findSource` returns the first
+  source containing the needle, and which chunk that is comes down to readdir order — nothing a
+  claude release owes you. A flag name or a short literal can grow a second, unrelated spelling
+  (2.1.263 did, for `("--sdk-url")`), and then the locator quietly points at the wrong function.
+  When the needle cannot be made unique, use `findSourceWhere(needle, accept)` and discriminate on
+  the code *around* the hit instead of on which one comes first.
 - Delimit so you capture the whole name: `hasStoredOAuthToken:([\w$]+)\}` (object-literal value ends
   at `}`), `getBridgeDisabledReason:([\w$]+)[,}]` (or `,`), destructuring
   `{preflightTrustedDeviceBlocking:([\w$]+)\}`.
@@ -280,6 +286,7 @@ known range to the gates that match it.
 | 2.1.239 | `bridgeMain.tokenurl`: `getBridgeAccessTokenAsync` added beside the sync getter, chosen at runtime | **branch** — `async-token` profile, aliases `M`/`A`/`P`/`U`, three rebinds |
 | 2.1.248 | all three `dispatch.*` guards lifted out of the entry into `chunk-77n86n8h.js`, regrouped into `refuseRemoteControlLocally` / `refuseRemoteControlIneligible` / `startRemoteControl` — `cli_bridge_path` no longer reaches any of them (`alias-not-found partial={}` ×3) | **branch** — `chunked-dispatch` profile; each gate re-anchors on a `<exportName>:` destructure key unique to that chunk; policy rebinds the shared `exitWithError` (one bp, three checks) since `isPolicyAllowed`'s alias imports only after the first two guards run |
 | 2.1.248 | interactive `int.enabled`/`baseurl`/`token`: the barrel's defining chunk uses a **bare** `export{n}` (with a non-renaming named import), which `resolveExport`'s `localFor` didn't recognise (`export-unresolved`) | shared-locator fix — `localFor` learned the `export{…,n,…}` form (only after the two renaming forms fail, only inside an `export{}` clause) |
+| 2.1.263 | `child.sdkUrl`: a SECOND `("--sdk-url")` appeared — an argv helper (`l3t((s)=>s.startsWith("--sdk-url"),t)`, the is-this-print-mode check) — in a chunk that readdir lists BEFORE the allowlist getter's own. First-hit `findSource` walked back into a parameterised helper and returned `dHs=null` | shared-locator fix — `findSourceWhere` scans every occurrence and keeps the one whose surroundings are the getter (zero-arg `function NAME(){`, a `{status:` verdict within 300 chars) |
 | 2.1.248 | latent: `getBridgeBaseUrl` minifies to local `$ae`; `$` is a regex metacharacter, so a local spliced raw into the import-edge regex silently failed to match (only `int.baseurl` drifted; `int.token`=`Ig` was fine) — surfaced by the fix above | shared-locator fix — `reEsc` escapes `$` before any local goes into a `new RegExp` |
 
 The pattern: path/name churn is absorbed automatically; window-edge fragility is a widen; a real

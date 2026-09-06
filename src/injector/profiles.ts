@@ -108,7 +108,7 @@ export const PROFILES: InjectionProfile[] = [
     // shared INTERACTIVE_GATES locator (localFor), not here.
     id: 'chunked-dispatch',
     since: '2.1.248',
-    verifiedThrough: '2.1.251',
+    verifiedThrough: '2.1.263',
     gates: headlessGates({
       oauth: GATE_DISPATCH_OAUTH_SPLIT,
       policy: GATE_DISPATCH_POLICY_SPLIT,

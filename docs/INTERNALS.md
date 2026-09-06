@@ -88,6 +88,13 @@ not a profile: it's a fix to the shared `/rc` export-resolver (`localFor` learne
 form, and locals spliced into locator regexes are now `$`-escaped — `getBridgeBaseUrl` minifies to
 `$ae` on 2.1.248). The interactive gate set is unchanged across every profile.
 
+2.1.263 is a second fix of that class, on the child `--sdk-url` locator. Nothing about the guard
+changed; a *different* function grew a second `("--sdk-url")` spelling, in a chunk that gets listed
+first, and first-hit anchoring is only ever as good as the anchor's uniqueness. The locator now
+scans every occurrence and keeps the one whose surroundings are the allowlist getter
+(`findSourceWhere`), so it is right regardless of chunk order — again one fix for every version,
+not a profile.
+
 Selection is **optimistic and never refuses on the version number**: an unknown-newer claude gets
 the newest profile, an unknown-older one gets the oldest (logged as `optimistic-newer` /
 `optimistic-older`). A wrong guess degrades to a loud, specific "gate X did not locate" — never a
