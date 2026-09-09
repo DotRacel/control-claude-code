@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/control-claude-code.png" alt="control-claude-code" width="160">
+
 # control-claude-code
 
 **为 Claude Code 的第三方中转站 API Key 用户提供类原生级别的远程操控体验**

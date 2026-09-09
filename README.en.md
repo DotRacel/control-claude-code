@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/control-claude-code.png" alt="control-claude-code" width="160">
+
 # control-claude-code
 
 **Native-grade remote control for Claude Code, for users on third-party relay API keys**
