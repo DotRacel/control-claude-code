@@ -95,6 +95,14 @@ scans every occurrence and keeps the one whose surroundings are the allowlist ge
 (`findSourceWhere`), so it is right regardless of chunk order — again one fix for every version,
 not a profile.
 
+2.1.270 drifted two gates and neither was a branch: `dispatch.policy`'s first getter was renamed
+`getBridgeDisabledReason` → `getBridgeDisabledDiagnosis` (and an `orgPolicyDenied` telemetry import
+appeared beside it), and `int.preflight`'s first check wrapped its early-return in a block with an
+`orgPolicyDenied` call in front of it. Both are the same idea in a new spelling, so both widened the
+*shared* gate — E's alias regex over the two getter names, the preflight `rebindRe` with a lazy gap
+before the return — and `chunked-dispatch` simply extended to 2.1.270. A widen on a shared gate must
+be re-verified downward by hand (2.1.248/.265/.266 all still green); `latest`-only CI cannot.
+
 Selection is **optimistic and never refuses on the version number**: an unknown-newer claude gets
 the newest profile, an unknown-older one gets the oldest (logged as `optimistic-newer` /
 `optimistic-older`). A wrong guess degrades to a loud, specific "gate X did not locate" — never a

@@ -106,9 +106,15 @@ export const PROFILES: InjectionProfile[] = [
     // gates (token/trust/httpscheme/spawn) stayed put and still use the async-token tokenurl. The
     // same re-chunk also gave the interactive exports a bare-export defining chunk — handled in the
     // shared INTERACTIVE_GATES locator (localFor), not here.
+    //
+    // 2.1.270 drifted two SHARED gates without changing the set: dispatch.policy's first getter was
+    // renamed getBridgeDisabledReason → getBridgeDisabledDiagnosis (E's regex widened over both),
+    // and int.preflight's first check grew an orgPolicyDenied telemetry block before its return
+    // (rebindRe widened with a lazy gap). Both are widens in anchors.ts, so no new profile — just
+    // verified further.
     id: 'chunked-dispatch',
     since: '2.1.248',
-    verifiedThrough: '2.1.263',
+    verifiedThrough: '2.1.270',
     gates: headlessGates({
       oauth: GATE_DISPATCH_OAUTH_SPLIT,
       policy: GATE_DISPATCH_POLICY_SPLIT,

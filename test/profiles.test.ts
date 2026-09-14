@@ -73,7 +73,9 @@ test('selectProfile: exact matches within each profile range', () => {
   // 2.1.248 re-chunked the app: the dispatch guards moved out of the entry into
   // chunk-77n86n8h.js, so the whole dispatch trio switches to the SPLIT variants while the
   // async-token tokenurl gate rides along unchanged.
-  for (const v of ['2.1.248', '2.1.250', '2.1.251']) {
+  // 2.1.270 stayed in this profile: dispatch.policy's getter rename and int.preflight's new
+  // telemetry block were absorbed by widening the shared gates, not by a new variant.
+  for (const v of ['2.1.248', '2.1.250', '2.1.251', '2.1.270']) {
     const { profile, note } = selectProfile(v);
     assert.equal(profile.id, 'chunked-dispatch', `${v} → chunked-dispatch`);
     assert.equal(note, 'exact');

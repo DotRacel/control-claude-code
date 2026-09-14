@@ -162,19 +162,28 @@ export const GATE_DISPATCH_OAUTH_SPLIT: GateSpec = {
 // neutralize the shared exit instead: break at `=await E()` (the first guard's call, where O is
 // bound but no guard has fired yet) and rebind O to a no-op, which defuses all three at once. The
 // guards still run — they only read config — but none can exit.
-// The anchor is `checkBridgeMinVersion:`, not `getBridgeDisabledReason:`: the latter also appears
+// The anchor is `checkBridgeMinVersion:`, not the disabled-reason getter: the latter also appears
 // (destructured) in another chunk that sorts ahead of this one in the directory sweep, and
 // findSource takes the first hit, so it would land off-function with the E alias unmatched
 // (partial={}). `checkBridgeMinVersion:` is a colon-destructure KEY unique across all 1797 chunks on
 // 2.1.251 — stable under minification — and windowBack reaches back the ~26 chars to E and O, both
 // destructured just before it.
+//
+// 2.1.270 renamed the first getter `getBridgeDisabledReason` → `getBridgeDisabledDiagnosis` (it now
+// returns a {orgPolicyDenied, reason} diagnosis rather than a bare reason string) and inserted a
+// `{logOrgPolicyDeniedAsync:i}` destructure between exitWithError and the first call. Neither
+// touches this gate's shape — E is still `<name>:e,` right before checkBridgeMinVersion, the call is
+// still `<var>=await e()` (o bound, no guard fired), and the policy exit further down still runs
+// through the same `o`. So E's regex WIDENS over the two names rather than branching; O/bpSubstr/
+// rebind are unchanged. windowFwd:480 still clears the call (~234 chars past the anchor even with
+// the extra import).
 export const GATE_DISPATCH_POLICY_SPLIT: GateSpec = {
   id: 'dispatch.policy',
   windowAnchor: 'checkBridgeMinVersion:',
   windowBack: 50,
   windowFwd: 480,
   aliases: {
-    E: 'getBridgeDisabledReason:([\\w$]+),',
+    E: 'getBridgeDisabled(?:Reason|Diagnosis):([\\w$]+),',
     O: 'exitWithError:([\\w$]+)\\}',
   },
   bpSubstr: '=await ${E}()',
@@ -674,7 +683,14 @@ export const INTERACTIVE_GATES: InteractiveGateSpec[] = [
     // is a property of today's code shape, not a promise. If a release stops doing that, this gate
     // needs the real fix — rebind the LOCALS that receive the results (`let h=await no();if(h)`),
     // which are ordinary `let` bindings and always writable, as one gate per check.
-    rebindRe: 'let [\\w$]+=await ([\\w$]+)\\(\\);if\\([\\w$]+\\)return\\{kind[^]*?let [\\w$]+=await ([\\w$]+)\\(\\);if\\([\\w$]+\\)return\\{kind[^]*?if\\(![^;]*?\\)return\\{kind[^]*?await [\\w$]+\\([^)]*\\),await ([\\w$]+)\\([^)]*\\)',
+    // 2.1.270 wrapped the FIRST check's early-return in a block and slipped an orgPolicyDenied
+    // telemetry call in front of it: `if(R)return{kind…}` → `if(R){if(R.orgPolicyDenied)db(…);
+    // return{kind…}}` (its getter also now returns a diagnosis object, `message:R.reason`). That is
+    // the only shape change; the second check, the login ternary and the trusted-device call are
+    // unchanged. So the first `if(…)…return{kind` gets a lazy `[^]*?` between the guard and its
+    // return — matching the empty gap on older builds AND the new intervening block — rather than a
+    // branch. The rebind is untouched: group1's getter → null still makes `if(R)` false.
+    rebindRe: 'let [\\w$]+=await ([\\w$]+)\\(\\);if\\([\\w$]+\\)[^]*?return\\{kind[^]*?let [\\w$]+=await ([\\w$]+)\\(\\);if\\([\\w$]+\\)return\\{kind[^]*?if\\(![^;]*?\\)return\\{kind[^]*?await [\\w$]+\\([^)]*\\),await ([\\w$]+)\\([^)]*\\)',
     rebindValues: ['async function(){return null}', 'async function(){return null}', 'async function(){return !1}'],
     sticky: true,
   },
