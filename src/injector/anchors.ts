@@ -496,20 +496,38 @@ export function buildChildLocatorExpr(globalKey: string): string {
         // takes no arguments (it reads process.argv itself), and it answers with the {status,url}
         // verdict that childDhsRebind below impersonates.
         //
-        // One regex, used to both pick the hit and read the name off it, so the accepted function
-        // and the reported dHs can never be two different things.
+        // "Encloses" is BRACE DEPTH, not "no braces in between". 2.1.271 gave the getter an early
+        // return ahead of its argv read (\`function J(){let e=x();if(e!==void 0)return{status:"ok",
+        // url:e};let n=K("--sdk-url")…\`), and a \`[^{}]*\` tail cannot reach past that object
+        // literal — the getter stopped being recognised and dHs went null from .271 on. So scan
+        // every \`function NAME(){\` in the lookback and keep the LAST one still OPEN at the flag
+        // read: that is the innermost enclosing zero-arg function at any nesting depth, and the
+        // already-closed helpers that crowd this region are skipped by construction.
+        //
+        // One function, used to both pick the hit and read the name off it, so the accepted
+        // function and the reported dHs can never be two different things.
         // NB: minified names can contain '$' (e.g. dHs = "l$s"), so match [\\w$]+ not \\w+.
-        var DECL = /function ([\\w$]+)\\(\\)\\{[^{}]*$/;
-        var declBefore = function(s, k){ return s.slice(k < 200 ? 0 : k - 200, k); };
+        function zeroArgFnAround(s, k){
+          var win = s.slice(k < 600 ? 0 : k - 600, k);
+          var re = /function ([\\w$]+)\\(\\)\\{/g, name = null, m;
+          while ((m = re.exec(win)) !== null) {
+            var depth = 1;
+            for (var i = m.index + m[0].length; i < win.length && depth > 0; i++) {
+              var c = win.charCodeAt(i);
+              if (c === 123) depth++; else if (c === 125) depth--;
+            }
+            if (depth > 0) name = m[1];
+          }
+          return name;
+        }
         var sd = findSourceWhere('("--sdk-url")', function(s, k){
-          return DECL.test(declBefore(s, k)) && /\\{status:/.test(s.slice(k, k + 300));
+          return zeroArgFnAround(s, k) !== null && /\\{status:/.test(s.slice(k, k + 300));
         });
         out.sdkUrlIdx = sd ? sd.idx : -1;
         if (sd) {
           out.file = sd.url;
           out.total_lines = totalLines(sd.url);
-          var mm = DECL.exec(declBefore(sd.s, sd.idx));
-          out.dHs = mm ? mm[1] : null;
+          out.dHs = zeroArgFnAround(sd.s, sd.idx);
         } else { out.dHs = null; out.total_lines = totalLines(MAIN); }
         // The reject site: \`let n=sd(Se);if(n!==null)\` right before the reject telemetry.
         //

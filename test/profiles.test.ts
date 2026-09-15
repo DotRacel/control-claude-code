@@ -74,8 +74,10 @@ test('selectProfile: exact matches within each profile range', () => {
   // chunk-77n86n8h.js, so the whole dispatch trio switches to the SPLIT variants while the
   // async-token tokenurl gate rides along unchanged.
   // 2.1.270 stayed in this profile: dispatch.policy's getter rename and int.preflight's new
-  // telemetry block were absorbed by widening the shared gates, not by a new variant.
-  for (const v of ['2.1.248', '2.1.250', '2.1.251', '2.1.270']) {
+  // telemetry block were absorbed by widening the shared gates, not by a new variant. So did
+  // 2.1.271/.272, whose only drift was in the shared child --sdk-url locator — which no profile
+  // carries, so the gate set here is untouched by it.
+  for (const v of ['2.1.248', '2.1.250', '2.1.251', '2.1.270', '2.1.272']) {
     const { profile, note } = selectProfile(v);
     assert.equal(profile.id, 'chunked-dispatch', `${v} → chunked-dispatch`);
     assert.equal(note, 'exact');

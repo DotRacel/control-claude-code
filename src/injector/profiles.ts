@@ -112,9 +112,14 @@ export const PROFILES: InjectionProfile[] = [
     // and int.preflight's first check grew an orgPolicyDenied telemetry block before its return
     // (rebindRe widened with a lazy gap). Both are widens in anchors.ts, so no new profile — just
     // verified further.
+    //
+    // 2.1.271 drifted the shared child --sdk-url locator, which is not part of any gate set: the
+    // allowlist getter grew an early return ahead of its argv read, so the enclosing-function walk
+    // now counts brace depth instead of demanding a brace-free span. Again a widen for every
+    // version, not a profile.
     id: 'chunked-dispatch',
     since: '2.1.248',
-    verifiedThrough: '2.1.270',
+    verifiedThrough: '2.1.272',
     gates: headlessGates({
       oauth: GATE_DISPATCH_OAUTH_SPLIT,
       policy: GATE_DISPATCH_POLICY_SPLIT,

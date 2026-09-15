@@ -103,6 +103,17 @@ appeared beside it), and `int.preflight`'s first check wrapped its early-return 
 before the return — and `chunked-dispatch` simply extended to 2.1.270. A widen on a shared gate must
 be re-verified downward by hand (2.1.248/.265/.266 all still green); `latest`-only CI cannot.
 
+2.1.271 is the third fix of the 2.1.263 class, on the same child `--sdk-url` locator and again on
+neither a gate nor a profile. The allowlist getter grew an early return ahead of its argv read
+(`function J(){let e=x();if(e!==void 0)return{status:"ok",url:e};let n=K("--sdk-url")…`), and the
+walk back to the enclosing function name demanded a *brace-free* span between `function NAME(){` and
+the flag — so the object literal in that new return hid the getter, `dHs` went null, and the gate
+reported `could not locate` on every build from .271 on. The walk now counts **brace depth**: scan
+every `function NAME(){` in the lookback and keep the last one still open at the flag read. That is
+the innermost enclosing zero-arg function at any nesting depth, and the already-closed argv helpers
+crowding this region are skipped by construction instead of by luck. Verified green from the floor
+of every profile (2.1.229/.238/.239/.248) through 2.1.272, and the spawn chain end to end on .272.
+
 Selection is **optimistic and never refuses on the version number**: an unknown-newer claude gets
 the newest profile, an unknown-older one gets the oldest (logged as `optimistic-newer` /
 `optimistic-older`). A wrong guess degrades to a loud, specific "gate X did not locate" — never a
