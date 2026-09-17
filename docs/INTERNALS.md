@@ -114,6 +114,19 @@ the innermost enclosing zero-arg function at any nesting depth, and the already-
 crowding this region are skipped by construction instead of by luck. Verified green from the floor
 of every profile (2.1.229/.238/.239/.248) through 2.1.272, and the spawn chain end to end on .272.
 
+2.1.273 drifted `dispatch.policy` and `dispatch.trust` together, and both were window-edge widens —
+the same class as `spawner.spawn`'s repeated drifts, not a structural change. The eligibility
+function used to import `getBridgeDisabledDiagnosis` and `checkBridgeMinVersion` in one destructure;
+.273 split them into per-chunk `{…}=await import("<chunk>")` blocks, so the first getter alias slid
+from ~29 to ~103 chars before the `checkBridgeMinVersion:` anchor and fell out of `windowBack` (50 →
+200). The trusted-device function folded its up-top imports into one `await Promise.all([import ×8])`,
+pushing the guard call `=await <preflight>(` from +393 to +686 past its anchor, out of `windowFwd`
+(450 → 900) — the gate located the alias fine but reported `bp-substr-not-found`. Neither guard's
+shape, alias regex, breakpoint substring, or rebind changed; only the search windows grew. Because a
+widen edits a gate every `chunked-dispatch` version shares, re-verified downward by hand — 17/17 on
+2.1.248/.266/.270/.271/.272/.273/.274 and each older profile's floor — and the spawn chain end to end
+on .274 (both widened gates hit + rebound, environment registered).
+
 Selection is **optimistic and never refuses on the version number**: an unknown-newer claude gets
 the newest profile, an unknown-older one gets the oldest (logged as `optimistic-newer` /
 `optimistic-older`). A wrong guess degrades to a loud, specific "gate X did not locate" — never a

@@ -117,9 +117,15 @@ export const PROFILES: InjectionProfile[] = [
     // allowlist getter grew an early return ahead of its argv read, so the enclosing-function walk
     // now counts brace depth instead of demanding a brace-free span. Again a widen for every
     // version, not a profile.
+    //
+    // 2.1.273 drifted dispatch.policy and dispatch.trust — both window-edge widens, no set change.
+    // The eligibility function's up-top imports split across chunks (getBridgeDisabledDiagnosis and
+    // checkBridgeMinVersion no longer share one destructure), pushing E out of windowBack (50→200);
+    // the trusted-device function folded its imports into one Promise.all, pushing `=await Z(` out
+    // of windowFwd (450→900). Same shapes, so still no new profile — just verified further.
     id: 'chunked-dispatch',
     since: '2.1.248',
-    verifiedThrough: '2.1.272',
+    verifiedThrough: '2.1.274',
     gates: headlessGates({
       oauth: GATE_DISPATCH_OAUTH_SPLIT,
       policy: GATE_DISPATCH_POLICY_SPLIT,

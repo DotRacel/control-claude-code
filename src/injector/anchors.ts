@@ -166,8 +166,8 @@ export const GATE_DISPATCH_OAUTH_SPLIT: GateSpec = {
 // (destructured) in another chunk that sorts ahead of this one in the directory sweep, and
 // findSource takes the first hit, so it would land off-function with the E alias unmatched
 // (partial={}). `checkBridgeMinVersion:` is a colon-destructure KEY unique across all 1797 chunks on
-// 2.1.251 — stable under minification — and windowBack reaches back the ~26 chars to E and O, both
-// destructured just before it.
+// 2.1.251 — stable under minification — and windowBack reaches back to E and O, both destructured
+// just before it (~29 chars on 2.1.272, ~103 once 2.1.273 split the destructure across chunks).
 //
 // 2.1.270 renamed the first getter `getBridgeDisabledReason` → `getBridgeDisabledDiagnosis` (it now
 // returns a {orgPolicyDenied, reason} diagnosis rather than a bare reason string) and inserted a
@@ -175,12 +175,19 @@ export const GATE_DISPATCH_OAUTH_SPLIT: GateSpec = {
 // touches this gate's shape — E is still `<name>:e,` right before checkBridgeMinVersion, the call is
 // still `<var>=await e()` (o bound, no guard fired), and the policy exit further down still runs
 // through the same `o`. So E's regex WIDENS over the two names rather than branching; O/bpSubstr/
-// rebind are unchanged. windowFwd:480 still clears the call (~234 chars past the anchor even with
-// the extra import).
+// rebind are unchanged.
+//
+// 2.1.273 split the up-top destructure across chunks: `getBridgeDisabledDiagnosis` and
+// `checkBridgeMinVersion` used to share one `await import(...)`, and now each is its own
+// `{…}=await import("<chunk>")` block, so E slid from ~29 chars before the anchor to ~103. Same
+// gate shape — E is still `<name>:e,`, exitWithError still just after, the call still `<var>=await
+// e()` — purely a window-edge widen: windowBack 50→200 lets E back in (measured 103 on .274, and
+// there is only ever one `getBridgeDisabled…:X,` in the lookback, so the first-match is unambiguous).
+// bpSubstr sits +213 past the anchor on .274, well inside windowFwd.
 export const GATE_DISPATCH_POLICY_SPLIT: GateSpec = {
   id: 'dispatch.policy',
   windowAnchor: 'checkBridgeMinVersion:',
-  windowBack: 50,
+  windowBack: 200,
   windowFwd: 480,
   aliases: {
     E: 'getBridgeDisabled(?:Reason|Diagnosis):([\\w$]+),',
@@ -194,11 +201,18 @@ export const GATE_DISPATCH_POLICY_SPLIT: GateSpec = {
 // then `if(u)…exitWithError` — only relocated, so the alias regex and rebind are unchanged and only
 // the anchor moves to this chunk. Rebind Z → null so `if(u)` never fires and startRemoteControl falls
 // straight through to bridgeMain.
+//
+// 2.1.273 folded the up-top imports into one big `await Promise.all([import(...) ×8])`, so the call
+// `<var>=await ${Z}(<arg>)` slid from +393 (on .272) to +686 past the anchor — the gate located Z
+// fine but reported bp-substr-not-found because `=await o(` fell past windowFwd:450. Same shape
+// (`m=await o(i);if(m)…exitWithError`), so a window-edge widen: windowFwd 450→900 (measured 686 on
+// .274, and `=await ${Z}(` is unique within 2400 chars of the anchor, so the wider window stays
+// unambiguous).
 export const GATE_DISPATCH_TRUST_SPLIT: GateSpec = {
   id: 'dispatch.trust',
   windowAnchor: 'preflightTrustedDeviceBlocking:',
   windowBack: 0,
-  windowFwd: 450,
+  windowFwd: 900,
   aliases: { Z: 'preflightTrustedDeviceBlocking:([\\w$]+)\\}' },
   bpSubstr: '=await ${Z}(',
   rebinds: ['${Z}=async function(){return null}'],
