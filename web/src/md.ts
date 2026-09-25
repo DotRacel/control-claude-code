@@ -7,7 +7,7 @@
  * read worse than rendered.
  *
  * Supported: fenced code, ATX headings (#..###), thematic breaks, blockquotes, ordered and
- * unordered lists (one nesting level), paragraphs; inline code, bold, italic, links.
+ * unordered lists (one nesting level), GFM tables, paragraphs; inline code, bold, italic, links.
  * Anything else falls through as literal text, which is the correct failure mode here.
  */
 import { createElement as h, type ReactNode } from 'react';
@@ -60,6 +60,51 @@ const HR = /^\s{0,3}([-*_])\s*(?:\1\s*){2,}$/;
 const QUOTE = /^\s{0,3}>\s?(.*)$/;
 const BULLET = /^(\s*)([-*+])\s+(.*)$/;
 const ORDERED = /^(\s*)(\d{1,9})[.)]\s+(.*)$/;
+
+// ── tables (GFM) ──
+// A header row, then a delimiter row with exactly as many cells, then body rows until a line
+// with no pipe or one that opens another block. Unlike GFM, a pipe-less line ends the table
+// instead of becoming a one-cell row: prose written straight under a table stays prose.
+const PIPE = /(?:^|[^\\])\|/;
+const DELIM_CELL = /^:?-+:?$/;
+type Align = 'left' | 'center' | 'right' | undefined;
+
+/** The outer pipes are optional; `\|` is a literal pipe, inside code spans too — GFM's one way
+ * to put a `|` in a cell. */
+function cells(row: string): string[] {
+  let s = row.trim();
+  if (s.startsWith('|')) s = s.slice(1);
+  if (s.endsWith('|') && !s.endsWith('\\|')) s = s.slice(0, -1);
+  const out: string[] = [];
+  let cur = '';
+  for (let j = 0; j < s.length; j++) {
+    if (s[j] === '\\' && s[j + 1] === '|') { cur += '|'; j++; }
+    else if (s[j] === '|') { out.push(cur.trim()); cur = ''; }
+    else cur += s[j];
+  }
+  out.push(cur.trim());
+  return out;
+}
+
+/** The column alignments if `line` is a delimiter row for `n` columns, else null. */
+function delimiter(line: string | undefined, n: number): Align[] | null {
+  if (line === undefined || !PIPE.test(line)) return null;
+  const c = cells(line);
+  if (c.length !== n || !c.every((x) => DELIM_CELL.test(x))) return null;
+  return c.map((x) => (x.endsWith(':') ? (x.startsWith(':') ? 'center' : 'right') : x.startsWith(':') ? 'left' : undefined));
+}
+
+const opensBlock = (line: string) => [FENCE, HEADING, QUOTE, BULLET, ORDERED].some((r) => r.test(line));
+
+/** Width in half-width units — a CJK or full-width character is two — markup characters aside. */
+function units(s: string): number {
+  let n = 0;
+  for (const ch of s.replace(/[`*]/g, '')) n += ch.codePointAt(0)! >= 0x2e80 ? 2 : 1;
+  return n;
+}
+/** A column whose widest cell is at most this many units is a label, and never wraps (`.fit`).
+ * Tied to the CSS: at the table's 14px it is about a third of a phone's 366px column. */
+const FIT_UNITS = 14;
 
 interface ListItem { text: string; nested: string[] }
 
@@ -137,6 +182,28 @@ export function renderMarkdown(src: string): ReactNode {
         ...inline(it.text, `l${k}n${n}`),
         ...(it.nested.length ? [h('ul', { key: 'n' }, ...it.nested.map((t, j) => h('li', { key: j }, ...inline(t, `l${k}n${n}s${j}`))))] : []),
       ))));
+      continue;
+    }
+    const header = PIPE.test(line) ? cells(line) : null;
+    const align = header && delimiter(lines[i + 1], header.length);
+    if (header && align) {
+      flushParagraph(para);
+      const rows: string[][] = [];
+      i += 2;
+      while (i < lines.length && PIPE.test(lines[i]) && !opensBlock(lines[i])) {
+        const r = cells(lines[i++]);
+        rows.push(header.map((_, j) => r[j] ?? '')); // GFM: a short row pads, a long one drops
+      }
+      const key = `t${k++}`;
+      const fit = header.map((c, j) => Math.max(units(c), ...rows.map((r) => units(r[j]))) <= FIT_UNITS);
+      const cell = (tag: 'th' | 'td', text: string, j: number, kb: string) =>
+        h(tag, { key: j, className: fit[j] ? 'fit' : undefined, style: align[j] && { textAlign: align[j] } }, ...inline(text, `${kb}c${j}`));
+      // The wrapper, not the table, is the scroller: a <table> ignores overflow. An all-empty
+      // header — how a key/value table is usually written — would draw only an empty band.
+      out.push(h('div', { key, className: 'md-table' }, h('table', null,
+        header.some(Boolean) ? h('thead', null, h('tr', null, ...header.map((c, j) => cell('th', c, j, `${key}h`)))) : null,
+        rows.length ? h('tbody', null, ...rows.map((r, n) => h('tr', { key: n }, ...r.map((c, j) => cell('td', c, j, `${key}r${n}`))))) : null,
+      )));
       continue;
     }
     if (!line.trim()) { flushParagraph(para); i++; continue; }

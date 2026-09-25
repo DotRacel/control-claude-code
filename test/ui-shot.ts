@@ -426,6 +426,17 @@ async function main() {
       },
     },
     {
+      // A markdown table in assistant prose: its label column must stay on one line and its prose
+      // column must wrap at a readable width, inside the column rather than past it.
+      name: '13b-markdown-table',
+      setup: async (c) => {
+        await c.eval(`(() => { const b = [...document.querySelectorAll('.session-card')].find(e => e.textContent.includes('racel-dev')); b && b.click(); })()`);
+        await sleep(900);
+        await c.eval(`(() => { const el = document.querySelector('.md-table'); el && el.scrollIntoView({ block: 'center' }); })()`);
+        await sleep(250);
+      },
+    },
+    {
       name: '14-bgtask-progress',
       setup: async (c) => {
         await c.eval(`(() => { const b = [...document.querySelectorAll('.session-card')].find(e => e.textContent.includes('racel-dev')); b && b.click(); })()`);

@@ -836,6 +836,25 @@ textarea { font: inherit; }
 .md-copy { align-self: flex-end; padding: 6px 10px 4px; font: 600 11px/1.4 var(--sans); color: var(--muted); }
 /* a copy that could not happen says so — silence reads as a dead button (see web/src/clipboard.ts) */
 .md-copy.fail, .btn.fail { color: var(--danger); }
+/* Tables scroll sideways inside their own box when the columns cannot fit, so a grid never
+   widens the page, and the prose `break-all` stops at its edge. Whether a phone can READ one is
+   down to column width: auto layout gives each column its min-content plus a share of the rest
+   in proportion to how wide it wants to be, so beside a prose column a label column was squeezed
+   to four characters (局域网/可达), and a table too wide to fit collapsed EVERY column to its
+   min-content — one word, or one CJK character. Hence two rules: a column md.ts judges to be a
+   label (.fit) never wraps, and every other column keeps a floor of 9em (padding included: about
+   7 CJK characters a line), scrolling rather than going under it. Measured on 18 real tables at
+   366px: 16 fit; 10em would push two more into scrolling, each by under 16px.
+   A px/em min-width on a cell is honoured by Chromium, Gecko and WebKit in auto layout; a
+   percentage is not. */
+.md-table { width: fit-content; max-width: 100%; margin: 0 0 12px; overflow-x: auto; overscroll-behavior-x: contain; border: 1px solid var(--line); border-radius: 10px; }
+.md-table table { border-collapse: collapse; font: 400 14px/1.5 var(--sans); word-break: normal; }
+.md-table th, .md-table td { min-width: 9em; padding: 7px 11px; text-align: left; vertical-align: top; }
+.md-table .fit { min-width: 0; white-space: nowrap; }
+.md-table th { font-weight: 600; color: var(--text); background: var(--raised); }
+.md-table td { color: var(--text-2); }
+.md-table tr + tr > td, .md-table thead + tbody td { border-top: 1px solid var(--line); }
+.md-table code { word-break: normal; }
 
 /* ── reduce motion: everything becomes an 80ms opacity fade (0c) ── */
 @media (prefers-reduced-motion: reduce) {

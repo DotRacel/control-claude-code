@@ -46,7 +46,9 @@ const EXTRA: any[] = [
     message: {
       role: 'assistant', model: 'claude-opus-5',
       content: [
-        { type: 'text', text: '我先看一下布局。三层结构是 `.screen`（flex column）→ `.topbar` / `.scroll.chat` / `.composer-wrap`，理论上转录区应该吃掉剩余空间。\n\n几个可能的点：\n\n1. `height: 100%` 在移动端浏览器上会被地址栏影响\n2. `min-height: 0` 缺失会让 flex 子项撑破容器\n3. 安全区 `env(safe-area-inset-*)` 只在 standalone 下有值\n\n```css\n.screen { height: 100%; display: flex; flex-direction: column; }\n.scroll { flex: 1; min-height: 0; overflow-y: auto; }\n```\n\n下面跑一下构建确认。' },
+        // The table is shaped like the ones real sessions hold: a label column that must not
+        // wrap, a code column, and a column of mixed-script prose (web/src/md.ts, styles.css).
+        { type: 'text', text: '我先看一下布局。三层结构是 `.screen`（flex column）→ `.topbar` / `.scroll.chat` / `.composer-wrap`，理论上转录区应该吃掉剩余空间。\n\n几个可能的点：\n\n1. `height: 100%` 在移动端浏览器上会被地址栏影响\n2. `min-height: 0` 缺失会让 flex 子项撑破容器\n3. 安全区 `env(safe-area-inset-*)` 只在 standalone 下有值\n\n| 层 | 现在的写法 | 在手机上的后果 |\n|---|---|---|\n| 外壳 | `height: 100%` | 地址栏收起后高度不跟着变，底部留出一条空白 |\n| 转录区 | 缺 `min-height: 0` | flex 子项按内容撑开，把输入框挤出屏幕 |\n| 输入框 | `env(safe-area-inset-bottom)` | 只在 standalone 下有值，浏览器标签页里是 0 |\n\n```css\n.screen { height: 100%; display: flex; flex-direction: column; }\n.scroll { flex: 1; min-height: 0; overflow-y: auto; }\n```\n\n下面跑一下构建确认。' },
         { type: 'tool_use', id: 'tu_prev1', name: 'Bash', input: { command: 'cd web && npm run build 2>&1 | tail -20' } },
       ],
     },
