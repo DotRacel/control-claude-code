@@ -127,6 +127,15 @@ widen edits a gate every `chunked-dispatch` version shares, re-verified downward
 2.1.248/.266/.270/.271/.272/.273/.274 and each older profile's floor — and the spawn chain end to end
 on .274 (both widened gates hit + rebound, environment registered).
 
+2.1.282 drifted `dispatch.trust` once more, and again cosmetically. The trusted-device function
+started importing a second name from the same chunk in the same destructure —
+`{preflightTrustedDeviceBlocking:r,sayHeldAutomaticEnrollmentNoticeOnStderr:i}` — and calls it
+between the guard and its check (`let p=await r(n);if(i(),p)…exitWithError`). Z's alias regex ended
+at `\}`, which now meets a `,` (`alias-not-found partial={}`), so it ends at `[,}]` like the other
+destructure-key aliases. Guard, breakpoint and rebind are unchanged; the new call only prints a held
+enrollment notice. Only the SPLIT variant carries this regex, so older profiles are untouched;
+verified 17/17 on 2.1.248/.274/.278/.280/.281/.282 and the spawn chain end to end on .282.
+
 Selection is **optimistic and never refuses on the version number**: an unknown-newer claude gets
 the newest profile, an unknown-older one gets the oldest (logged as `optimistic-newer` /
 `optimistic-older`). A wrong guess degrades to a loud, specific "gate X did not locate" — never a

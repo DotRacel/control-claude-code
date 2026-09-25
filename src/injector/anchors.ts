@@ -208,12 +208,18 @@ export const GATE_DISPATCH_POLICY_SPLIT: GateSpec = {
 // (`m=await o(i);if(m)…exitWithError`), so a window-edge widen: windowFwd 450→900 (measured 686 on
 // .274, and `=await ${Z}(` is unique within 2400 chars of the anchor, so the wider window stays
 // unambiguous).
+//
+// 2.1.282 imported a second name from the trusted-device chunk in the same destructure —
+// `{preflightTrustedDeviceBlocking:r,sayHeldAutomaticEnrollmentNoticeOnStderr:i}` — and called it
+// between the guard and its check (`let p=await r(n);if(i(),p)…exitWithError`). The `\}` that ended
+// Z's regex now meets a `,` instead (alias-not-found partial={}), so Z ends at `[,}]` like E and G
+// already do. The guard, bpSubstr and rebind are unchanged; the new call only prints a held notice.
 export const GATE_DISPATCH_TRUST_SPLIT: GateSpec = {
   id: 'dispatch.trust',
   windowAnchor: 'preflightTrustedDeviceBlocking:',
   windowBack: 0,
   windowFwd: 900,
-  aliases: { Z: 'preflightTrustedDeviceBlocking:([\\w$]+)\\}' },
+  aliases: { Z: 'preflightTrustedDeviceBlocking:([\\w$]+)[,}]' },
   bpSubstr: '=await ${Z}(',
   rebinds: ['${Z}=async function(){return null}'],
 };

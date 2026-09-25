@@ -123,9 +123,12 @@ export const PROFILES: InjectionProfile[] = [
     // checkBridgeMinVersion no longer share one destructure), pushing E out of windowBack (50→200);
     // the trusted-device function folded its imports into one Promise.all, pushing `=await Z(` out
     // of windowFwd (450→900). Same shapes, so still no new profile — just verified further.
+    //
+    // 2.1.282 drifted dispatch.trust again, cosmetically: the trusted-device destructure gained a
+    // second key after preflightTrustedDeviceBlocking, so Z's regex ends at `[,}]` instead of `\}`.
     id: 'chunked-dispatch',
     since: '2.1.248',
-    verifiedThrough: '2.1.274',
+    verifiedThrough: '2.1.282',
     gates: headlessGates({
       oauth: GATE_DISPATCH_OAUTH_SPLIT,
       policy: GATE_DISPATCH_POLICY_SPLIT,
