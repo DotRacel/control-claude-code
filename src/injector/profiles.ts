@@ -126,9 +126,13 @@ export const PROFILES: InjectionProfile[] = [
     //
     // 2.1.282 drifted dispatch.trust again, cosmetically: the trusted-device destructure gained a
     // second key after preflightTrustedDeviceBlocking, so Z's regex ends at `[,}]` instead of `\}`.
+    //
+    // 2.1.283 moved no gate at all: a new daemon helper also destructures `checkBridgeMinVersion:`,
+    // and the headless locator now takes the first anchor hit a gate's whole shape resolves against
+    // instead of the first hit. Same gate set, so no new profile.
     id: 'chunked-dispatch',
     since: '2.1.248',
-    verifiedThrough: '2.1.282',
+    verifiedThrough: '2.1.283',
     gates: headlessGates({
       oauth: GATE_DISPATCH_OAUTH_SPLIT,
       policy: GATE_DISPATCH_POLICY_SPLIT,

@@ -78,8 +78,9 @@ test('selectProfile: exact matches within each profile range', () => {
   // 2.1.271/.272, whose only drift was in the shared child --sdk-url locator — which no profile
   // carries, so the gate set here is untouched by it. And so did 2.1.273/.274, whose dispatch.policy
   // and dispatch.trust drifts were window-edge widens (windowBack/windowFwd), not set changes —
-  // and 2.1.282, whose extra destructure key after preflightTrustedDeviceBlocking widened Z's regex.
-  for (const v of ['2.1.248', '2.1.250', '2.1.251', '2.1.270', '2.1.272', '2.1.274', '2.1.282']) {
+  // and 2.1.282, whose extra destructure key after preflightTrustedDeviceBlocking widened Z's regex,
+  // and 2.1.283, whose second `checkBridgeMinVersion:` was a shared-locator fix, not a set change.
+  for (const v of ['2.1.248', '2.1.250', '2.1.251', '2.1.270', '2.1.272', '2.1.274', '2.1.282', '2.1.283']) {
     const { profile, note } = selectProfile(v);
     assert.equal(profile.id, 'chunked-dispatch', `${v} → chunked-dispatch`);
     assert.equal(note, 'exact');

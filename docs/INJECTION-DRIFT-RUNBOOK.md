@@ -177,7 +177,9 @@ clean. A `GateSpec` is four things:
   claude release owes you. A flag name or a short literal can grow a second, unrelated spelling
   (2.1.263 did, for `("--sdk-url")`), and then the locator quietly points at the wrong function.
   When the needle cannot be made unique, use `findSourceWhere(needle, accept)` and discriminate on
-  the code *around* the hit instead of on which one comes first.
+  the code *around* the hit instead of on which one comes first. Headless `GateSpec`s get this for
+  free since 2.1.283: the locator takes the first hit the gate's aliases and bpSubstr all resolve
+  against — so for them, make the *regexes* specific enough that only the right function matches.
 - Delimit so you capture the whole name: `hasStoredOAuthToken:([\w$]+)\}` (object-literal value ends
   at `}`), `getBridgeDisabledReason:([\w$]+)[,}]` (or `,`), destructuring
   `{preflightTrustedDeviceBlocking:([\w$]+)\}`.
@@ -294,6 +296,7 @@ known range to the gates that match it.
 | 2.1.273 | `dispatch.policy`: the eligibility fn's up-top imports split across chunks — `getBridgeDisabledDiagnosis` and `checkBridgeMinVersion` stopped sharing one `await import(...)`, so E slid from ~29 to ~103 chars before the `checkBridgeMinVersion:` anchor (`alias-not-found partial={}`) | **widen** — `windowBack` 50→200; E regex, O, bpSubstr, rebind all unchanged (one `getBridgeDisabled…:X,` in the lookback, so first-match stays unambiguous) |
 | 2.1.273 | `dispatch.trust`: the trusted-device fn folded its imports into one `await Promise.all([import ×8])`, pushing the guard call `=await <preflight>(` from +393 to +686 past `preflightTrustedDeviceBlocking:` — alias located but `bp-substr-not-found sub="=await o("` | **widen** — `windowFwd` 450→900; Z regex, bpSubstr, rebind unchanged (`=await ${Z}(` unique within 2400 chars of the anchor) |
 | 2.1.282 | `dispatch.trust`: the trusted-device destructure gained a second key — `{preflightTrustedDeviceBlocking:r,sayHeldAutomaticEnrollmentNoticeOnStderr:i}` — so Z's `…:([\w$]+)\}` met a `,` (`alias-not-found partial={}`); the guard became `let p=await r(n);if(i(),p)…` | **widen** — Z ends at `[,}]`; anchor, window, bpSubstr, rebind unchanged. Only the SPLIT variant carries it, so older profiles are untouched |
+| 2.1.283 | `dispatch.policy`: the anchor stopped being unique — a new daemon helper also destructures it (`let[{getBridgeBlockedCode:r},{checkBridgeMinVersion:n},…]=await Promise.all([…])`) in a chunk listed ahead of the guard's own, so the first hit landed off-function (`alias-not-found partial={}`). The guard function did not change by a byte | shared-locator fix — the headless locator takes the first anchor hit that the gate's aliases AND bpSubstr all resolve against (`findSourceWhere`), falling back to the first hit only to report the error. Every gate, every profile; re-verified 17/17 from each profile's floor |
 
 The pattern: path/name churn is absorbed automatically; window-edge fragility is a widen; a real
 structural change is a branch. When unsure which, the error string in step 1 and the offset math in

@@ -136,6 +136,15 @@ destructure-key aliases. Guard, breakpoint and rebind are unchanged; the new cal
 enrollment notice. Only the SPLIT variant carries this regex, so older profiles are untouched;
 verified 17/17 on 2.1.248/.274/.278/.280/.281/.282 and the spawn chain end to end on .282.
 
+2.1.283 moved no gate. A new daemon helper also destructures `checkBridgeMinVersion:` — the
+`dispatch.policy` anchor — in a chunk the directory sweep lists ahead of the guard's own, so the
+first hit landed in the wrong function (`alias-not-found partial={}`). The headless locator no longer
+trusts the first hit: it takes the first anchor hit that the gate's aliases **and** its breakpoint
+substring all resolve against, and reports the first hit only when none does, so a real drift reads
+exactly as before. That is every gate in every profile, so it was re-verified 17/17 from each
+profile's floor (2.1.229/.238/.239/.248) and across .273/.274/.280–.283, plus the spawn chain end to
+end on .283.
+
 Selection is **optimistic and never refuses on the version number**: an unknown-newer claude gets
 the newest profile, an unknown-older one gets the oldest (logged as `optimistic-newer` /
 `optimistic-older`). A wrong guess degrades to a loud, specific "gate X did not locate" — never a

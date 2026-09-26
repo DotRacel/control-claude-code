@@ -184,6 +184,13 @@ export const GATE_DISPATCH_OAUTH_SPLIT: GateSpec = {
 // e()` — purely a window-edge widen: windowBack 50→200 lets E back in (measured 103 on .274, and
 // there is only ever one `getBridgeDisabled…:X,` in the lookback, so the first-match is unambiguous).
 // bpSubstr sits +213 past the anchor on .274, well inside windowFwd.
+//
+// 2.1.283 ended the anchor's uniqueness: a new daemon helper imports it too
+// (`let[{getBridgeBlockedCode:r},{checkBridgeMinVersion:n},…]=await Promise.all([…])`), in a chunk
+// the directory sweep lists first, so the first hit landed off-function (alias-not-found
+// partial={}). This function did not change by a byte. The fix is in the locator, not here: it now
+// takes the first hit the gate's whole shape resolves against, and the helper has neither
+// `getBridgeDisabled…:` nor `exitWithError:` anywhere near it.
 export const GATE_DISPATCH_POLICY_SPLIT: GateSpec = {
   id: 'dispatch.policy',
   windowAnchor: 'checkBridgeMinVersion:',
@@ -616,27 +623,37 @@ export function buildLocatorExpr(globalKey: string, gates: GateSpec[] = GATES): 
         var GATES = ${GATES_JSON};
         ${LOCATOR_PRELUDE}
         function fillLocal(t, vars){ return t.replace(/\\$\\{(\\w+)\\}/g, function(_, k){ return (k in vars) ? vars[k] : ("\\${"+k+"}"); }); }
+        // Resolve gate G against one anchor hit: {aliases, absIdx} on success, else {error, …}.
+        function resolveAt(G, s, anchorIdx){
+          var start = Math.max(0, anchorIdx - G.windowBack);
+          var win = s.slice(start, anchorIdx + G.windowFwd);
+          var aliases = {};
+          for (var name in G.aliases) {
+            var m = new RegExp(G.aliases[name]).exec(win);
+            if (!m) return { error: "alias-not-found", partial: aliases };
+            aliases[name] = m[1];
+          }
+          var sub = fillLocal(G.bpSubstr, aliases);
+          var rel = win.indexOf(sub);
+          if (rel < 0) return { error: "bp-substr-not-found", aliases: aliases, sub: sub };
+          return { aliases: aliases, absIdx: start + rel };
+        }
         var out = [];
         for (var gi = 0; gi < GATES.length; gi++) {
           var G = GATES[gi];
-          var at = findSource(G.windowAnchor);
+          // The anchor's first hit is not enough: no claude release owes us a unique anchor, nor
+          // the readdir order that decides which chunk is "first" (2.1.283 grew a second
+          // \`checkBridgeMinVersion:\` in a daemon helper listed ahead of the guard's own chunk).
+          // Take the first hit the gate's whole shape — every alias AND the breakpoint — resolves
+          // against, the same resolveAt that then reports it. When no hit does, report the first
+          // one, so a real drift reads exactly as it always has.
+          var at = findSourceWhere(G.windowAnchor, function(s, k){ return !resolveAt(G, s, k).error; })
+            || findSource(G.windowAnchor);
           if (!at) { out.push({ id: G.id, error: "anchor-not-found" }); continue; }
-          var s = at.s, anchorIdx = at.idx;
-          var start = Math.max(0, anchorIdx - G.windowBack);
-          var win = s.slice(start, anchorIdx + G.windowFwd);
-          var aliases = {}, ok = true;
-          for (var name in G.aliases) {
-            var m = new RegExp(G.aliases[name]).exec(win);
-            if (!m) { ok = false; break; }
-            aliases[name] = m[1];
-          }
-          if (!ok) { out.push({ id: G.id, error: "alias-not-found", partial: aliases, file: at.url }); continue; }
-          var sub = fillLocal(G.bpSubstr, aliases);
-          var rel = win.indexOf(sub);
-          if (rel < 0) { out.push({ id: G.id, error: "bp-substr-not-found", aliases: aliases, sub: sub, file: at.url }); continue; }
-          var absIdx = start + rel;
-          var lc = absLineCol(at.url, absIdx);
-          out.push({ id: G.id, file: at.url, line: lc.line, col: lc.col, aliases: aliases });
+          var r = resolveAt(G, at.s, at.idx);
+          if (r.error) { out.push(Object.assign({ id: G.id }, r, { file: at.url })); continue; }
+          var lc = absLineCol(at.url, r.absIdx);
+          out.push({ id: G.id, file: at.url, line: lc.line, col: lc.col, aliases: r.aliases });
         }
         globalThis[${K}] = { main: MAIN, gates: out };
       } catch (e) { globalThis[${K}] = "ERR:" + (e && e.message || e); }
