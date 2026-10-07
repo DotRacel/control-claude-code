@@ -137,7 +137,9 @@ function BgTaskCard({ it, cls }: { it: Extract<Item, { kind: 'bgtask' }>; cls?: 
   const tools = it.tools
     ? t({ k: it.tools === 1 ? 'tool.toolCountOne' : 'tool.toolCountMany', p: { n: it.tools } })
     : null;
-  const bits = [state, durationLabel(it.ms), tools].filter(Boolean);
+  // A resumed run carries the same title as the run above it, so without this the two cards
+  // read as one task listed twice.
+  const bits = [it.resumed ? t({ k: 'bgtask.resumed' }) : null, state, durationLabel(it.ms), tools].filter(Boolean);
   return (
     <div className={`bgtask${it.status === 'failed' ? ' failed' : ''} ${cls ?? ''}`}>
       <div className="bgtask-row">

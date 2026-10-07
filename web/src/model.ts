@@ -101,7 +101,11 @@ export type Item =
       // NOT a duplicate of the Agent tool card: the tool_result for the same call is a different,
       // much shorter text, so this is the only copy the transcript ever gets. `summary` holds its
       // headline; the body renders behind a toggle.
-      summary?: string; report?: string; detail?: string; phases?: string[]; tools?: number; ms?: number }
+      //
+      // `resumed` marks a second (or later) run of a task that had already ended: a SendMessage to
+      // a finished subagent re-sends `task_started` under the SAME task_id. Each run is its own
+      // card, placed where it started, so the earlier run keeps the report it ended with.
+      summary?: string; report?: string; detail?: string; phases?: string[]; tools?: number; ms?: number; resumed?: boolean }
   | { kind: 'status'; id: number; text: Msg }
   /** A hard break in the conversation: /clear, a compaction, the worker going away. */
   | { kind: 'divider'; id: number; label: Msg }
@@ -161,6 +165,15 @@ export interface TranscriptState {
    * and it is what test/model.test.ts asserts on instead of "unknown types are inert".
    */
   unhandled: Record<string, number>;
+  /**
+   * Tasks the wire announces that get no card of their own: a foreground command (its tool card
+   * already IS the task) and anything a subagent runs (its agent's card already reports it). Kept,
+   * rather than merely skipped, so the rest of the task's events can be recognised as belonging to
+   * it — a notification for an id with no card would otherwise create one — and so a foreground
+   * command moved to the background later still has a description to put on the card it then
+   * earns. `owned` is the subagent case, which never earns one.
+   */
+  quietTasks: Record<string, { description?: string; owned: boolean }>;
 }
 
 export const initialState = (): TranscriptState => ({
@@ -171,6 +184,7 @@ export const initialState = (): TranscriptState => ({
   pendingWeb: [],
   todos: [],
   unhandled: {},
+  quietTasks: {},
 });
 
 /** A non-empty string, or undefined — for payload fields that are sometimes present and empty. */
@@ -391,14 +405,24 @@ function system(d: Draft, p: any): TranscriptState {
       if (typeof p.status_detail === 'string' && p.status_detail.trim()) push(d, { kind: 'status', text: p.status_detail.trim() });
       return d;
     case 'status': {
-      // A generic "surfaced notice" in the protocol whose only observed use is compaction, as a
+      // A generic "surfaced notice" in the protocol with two observed uses. Compaction, as a
       // pair: `status:'compacting'` when it starts, then `compact_result` when it lands (26 of each
-      // in the sampled history, never anything else). The start is worth a live flag because that
-      // stretch is otherwise unmarked; the success is not worth a transcript line because
-      // `compact_boundary` follows with the actual numbers.
+      // in the sampled history). The start is worth a live flag because that stretch is otherwise
+      // unmarked; the success is not worth a transcript line because `compact_boundary` follows
+      // with the actual numbers.
       // `busy` is deliberately NOT set here: system() cannot see opts.isHistory, and a backfill
       // must never flip it (the view re-derives it with turnActiveIn). It does not need to — every
       // sampled compaction had `trigger:'auto'`, which fires mid-turn, so the turn is already busy.
+      //
+      // And the permission mode: `{status:null, permissionMode}` — 37 of 40 status events in a
+      // 14596-event census (claude 2.1.280), every one drawn as an unadapted marker until this
+      // branch. The CLI sends it from onPermissionModeChanged, so it lands on a mode change, ahead
+      // of the re-sent `system:init` that says the same thing — but 35 of the 37 repeated the mode
+      // already in force. It is a level, not news: it updates what the mode chip reads, exactly as
+      // init does, and adds no line, which would mostly be announcing nothing.
+      // The schema allows the field on every status, so it is read before anything else.
+      const mode = str(p.permissionMode);
+      if (mode) d.live.permissionMode = mode;
       if (p.status === 'compacting') {
         d.live.compacting = true;
         return d;
@@ -412,6 +436,11 @@ function system(d: Draft, p: any): TranscriptState {
         if (done !== 'success') push(d, { kind: 'error', title: { k: 'compact.failed' }, detail: str(p.compact_error) ?? done });
         return d;
       }
+      if (mode) return d;
+      // The third value the schema's enum allows (`compacting | requesting | null`): the engine's
+      // `stream_request_start`, once per API request. Not seen on the bridge yet, but decided now
+      // because the alternative is a marker per request — and `busy` already says a turn is on.
+      if (p.status === 'requesting') return d;
       // Any other notice under this subtype. Declaring `system:status` handled must not silently
       // become a wildcard for notices nobody has looked at, so this still reaches the backlog —
       // qualified by the value, which is what a future reader needs in order to decide.
@@ -435,8 +464,30 @@ function system(d: Draft, p: any): TranscriptState {
     }
     case 'task_started': {
       const taskId = String(p.task_id ?? '');
-      if (!taskId || d.items.some((i) => i.kind === 'bgtask' && i.taskId === taskId)) return d;
-      push(d, { kind: 'bgtask', taskId, description: p.description ? String(p.description) : { k: 'bgtask.untitled' }, status: 'running' });
+      if (!taskId) return d;
+      // Not every task is background work. In the 14596-event census 222 of 248 starts were Bash
+      // commands: 47 the main thread's own foreground calls (`is_backgrounded:false`), each one
+      // already on screen as its tool card, and 175 run by a subagent (`owned_by_subagent`), whose
+      // own card already reports them through task_progress. One session drew 195 task cards, 16
+      // of them for anything the user had asked for. `skip_transcript` is the schema's own flag
+      // for the same decision (2.1.292, "hide this from the inline transcript").
+      const owned = p.owned_by_subagent === true;
+      if (owned || p.is_backgrounded === false || p.skip_transcript === true) {
+        d.quietTasks = { ...d.quietTasks, [taskId]: { description: str(p.description), owned } };
+        return d;
+      }
+      const at = taskCardAt(d, taskId);
+      // A start for a task that already has a card is either a duplicate (the card is still
+      // running) or the task being resumed — a SendMessage to a finished subagent re-sends
+      // `task_started` under the same id, and its next run reports through the same id too. That
+      // run used to be dropped: the card kept saying 失败 or 完成 for the whole of it (313
+      // progress frames, in the census) while the agent worked. It gets a card of its own, here,
+      // where it started; the earlier run keeps its card and the report it ended with.
+      if (at >= 0 && (d.items[at] as Extract<Item, { kind: 'bgtask' }>).status === 'running') return d;
+      push(d, {
+        kind: 'bgtask', taskId, description: p.description ? String(p.description) : { k: 'bgtask.untitled' }, status: 'running',
+        ...(at >= 0 ? { resumed: true } : {}),
+      });
       return d;
     }
     case 'task_notification': {
@@ -447,11 +498,14 @@ function system(d: Draft, p: any): TranscriptState {
       // the note on the Item type) and therefore the weakest claim available.
       const known = taskStateOf(p.status);
       if (!known) noteUnknown(d, `system:task_notification:${str(p.status) ?? '?'}`);
+      // A quiet task's end is on its tool card already (or inside its subagent's), and without a
+      // card to update this branch would create one — the very card task_started declined to draw.
+      if (d.quietTasks[taskId]) return d;
       const status: 'completed' | 'failed' | 'interrupted' =
         known === 'completed' || known === 'failed' || known === 'interrupted' ? known : 'interrupted';
       const outcome = splitSummary(p.summary);
       const usage = taskUsage(p.usage);
-      const at = d.items.findIndex((i) => i.kind === 'bgtask' && i.taskId === taskId);
+      const at = taskCardAt(d, taskId);
       // The card already names the task (from task_started); the notification's summary is the
       // *outcome* line, so add it alongside. Creating a card from the notification alone, there is
       // nothing else to show, so the summary becomes the description — not also a duplicate line.
@@ -489,7 +543,7 @@ function system(d: Draft, p: any): TranscriptState {
       // Progress for a task already on screen. It never *creates* a card: a progress frame for a
       // task whose `task_started` we never saw would render a task nobody asked about.
       const taskId = String(p.task_id ?? '');
-      const at = d.items.findIndex((i) => i.kind === 'bgtask' && i.taskId === taskId);
+      const at = taskCardAt(d, taskId);
       if (!taskId || at < 0) return d;
       const it = d.items[at] as Extract<Item, { kind: 'bgtask' }>;
       if (it.status !== 'running') return d; // a late frame must not revive a finished card
@@ -509,7 +563,18 @@ function system(d: Draft, p: any): TranscriptState {
       // `patch` is a partial task record; only a terminal status changes what the card says.
       const taskId = String(p.task_id ?? '');
       const status = p.patch?.status;
-      const at = d.items.findIndex((i) => i.kind === 'bgtask' && i.taskId === taskId);
+      // The one patch that matters before any status does: a foreground command moved to the
+      // background (`patch:{is_backgrounded:true}`, the schema's own words for it). From here on
+      // it outlives its tool call — whose result now only says it went to the background — so it
+      // is background work after all and earns the card task_started held back. A subagent's
+      // command does not: it is still its agent's business (both census cases were that kind).
+      const quiet = d.quietTasks[taskId];
+      if (quiet && p.patch?.is_backgrounded === true && !quiet.owned) {
+        const { [taskId]: _, ...rest } = d.quietTasks;
+        d.quietTasks = rest;
+        push(d, { kind: 'bgtask', taskId, description: quiet.description ?? { k: 'bgtask.untitled' }, status: 'running' });
+      }
+      const at = taskCardAt(d, taskId);
       if (!taskId || at < 0 || typeof status !== 'string') return d;
       // Anything not recognised used to fold into `running`, which is how a `killed` patch left
       // its card spinning for the rest of the transcript. An undecided word is backlog, and the
@@ -564,6 +629,16 @@ function system(d: Draft, p: any): TranscriptState {
 function assistant(d: Draft, p: any, ts: number | undefined, isHistory: boolean): TranscriptState {
   const content = p.message?.content;
   if (!Array.isArray(content)) return d;
+  // An API failure the CLI dresses as a message (`is_api_error_message`, model `<synthetic>`): a
+  // 429 in the census read `API Error: Request rejected (429) · Upstream rate limit exceeded`,
+  // drawn as prose — Claude, apparently, saying so. Nobody said it. The text stays verbatim as the
+  // detail; the title is ours.
+  if (p.is_api_error_message === true) {
+    if (!isHistory) d.live.thinking = false;
+    const text = content.map((b: any) => (b?.type === 'text' && typeof b.text === 'string' ? b.text.trim() : '')).filter(Boolean).join('\n');
+    push(d, { kind: 'error', title: { k: 'error.api' }, detail: text || undefined });
+    return d;
+  }
   // Only a tool_use (below) may arm `busy`. The worker delivers the turn's FINAL text after the
   // `result` (observed live: assistant[thinking] → result → assistant[text], same message id), so
   // a text-only message arriving while idle is a turn that already ended, not one starting — and
@@ -663,6 +738,19 @@ function agentDescriptionOf(d: Draft, toolUseId: unknown): string | undefined {
 }
 
 /**
+ * The card a task's next event belongs to: the NEWEST one with its id. A resumed task has a card
+ * per run, and only the last run can still be reporting — the first match would have a finished
+ * run's card swallow every frame of the live one.
+ */
+function taskCardAt(d: Draft, taskId: string): number {
+  for (let i = d.items.length - 1; i >= 0; i--) {
+    const it = d.items[i];
+    if (it.kind === 'bgtask' && it.taskId === taskId) return i;
+  }
+  return -1;
+}
+
+/**
  * `tool_uses` / `duration_ms` off a task payload's `usage`.
  *
  * Read here as well as in `task_progress` because the two do not always both arrive: a task that
@@ -724,7 +812,8 @@ function taskNotification(d: Draft, raw: string): TranscriptState {
   const ids = [...raw.matchAll(/<task-id>([^<]+)<\/task-id>/g)].map((m) => m[1].trim()).filter((id) => id && !id.startsWith('__orphan_summary__'));
   if (ids.length === 0) { if (head) push(d, { kind: 'status', text: head }); return d; }
   for (const taskId of ids) {
-    const at = d.items.findIndex((i) => i.kind === 'bgtask' && i.taskId === taskId);
+    if (d.quietTasks[taskId]) continue; // same rule as the structured notification
+    const at = taskCardAt(d, taskId);
     if (at >= 0) { const it = d.items[at] as Extract<Item, { kind: 'bgtask' }>; d.items[at] = { ...it, status, summary: head || it.summary, report: body ?? it.report, ...usage }; }
     else {
       // Same preference as the structured branch: the spawning Agent call's own label beats the
@@ -855,7 +944,10 @@ function endTurn(d: Draft, failed = false): void {
 
 function result(d: Draft, p: any): TranscriptState {
   const failed = p.subtype && p.subtype !== 'success';
-  endTurn(d, failed);
+  // `subtype:'success'` does not mean the turn succeeded: the census's API-error turn ended on
+  // `{subtype:'success', is_error:true, terminal_reason:'api_error'}`. Anything it left open did
+  // not finish. No card of its own, though — the error message ahead of it already said why.
+  endTurn(d, failed || p.is_error === true);
   if (failed) {
     push(d, { kind: 'error', title: String(p.subtype), detail: typeof p.result === 'string' ? p.result : undefined });
   }

@@ -75,9 +75,10 @@ export const SHAPES: Record<string, ShapeRule> = {
   'system:post_turn_summary': { verdict: 'handled' },
   // Compaction, which arrives as three events: `status:'compacting'` when it starts, a
   // `status` carrying `compact_result` when it lands, and `compact_boundary` with the token
-  // numbers. `status` is a generic "surfaced notice" subtype in the protocol — compaction is
-  // merely the only use of it seen so far, so the reducer files an unrecognised notice as
-  // backlog rather than treating this rule as a wildcard for all of them.
+  // numbers. `status` is a generic "surfaced notice" subtype in the protocol, and the reducer
+  // judges it one level down by value: compaction, the permission mode (`status:null` carrying
+  // `permissionMode`), and `requesting` are decided; any other notice is filed as backlog
+  // (`system:status:<value>`) rather than this rule acting as a wildcard for all of them.
   'system:status': { verdict: 'handled' },
   'system:compact_boundary': { verdict: 'handled' },
   'system:task_started': { verdict: 'handled' },

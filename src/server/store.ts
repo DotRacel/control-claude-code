@@ -551,6 +551,12 @@ export class Store {
           settle();
           return;
         }
+        // A mode change arrives as `system:status` carrying `permissionMode` before the re-sent
+        // init repeats it (docs/EVENTS.md) — same field, same meaning, so the row reads both.
+        if (payload.subtype === 'status') {
+          if (typeof payload.permissionMode === 'string' && payload.permissionMode) d.mode = payload.permissionMode;
+          return;
+        }
         if (payload.subtype !== 'init') return;
         if (typeof payload.model === 'string') d.model = payload.model;
         if (typeof payload.permissionMode === 'string') d.mode = payload.permissionMode;

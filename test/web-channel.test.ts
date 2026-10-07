@@ -153,6 +153,21 @@ test('the session list gets a digest without subscribing to the transcript', asy
   });
 });
 
+test('the list row follows a mode change announced on the status channel', async () => {
+  // claude 2.1.280 says it with `system:status` first and the re-sent init after; the row must
+  // not wait for the second, or miss it on a worker that sends only the first.
+  await withLoop(async ({ sid, post, server }) => {
+    await post([
+      { type: 'system', subtype: 'init', model: 'claude-opus-5', permissionMode: 'plan', cwd: '' },
+      { type: 'system', subtype: 'status', status: null, permissionMode: 'bypassPermissions' },
+    ]);
+    assert.equal(server.store.view(server.store.getSession(sid)!).digest.mode, 'bypassPermissions');
+    // A compaction notice carries no mode, and must not blank the one the row has.
+    await post([{ type: 'system', subtype: 'status', status: 'compacting' }]);
+    assert.equal(server.store.view(server.store.getSession(sid)!).digest.mode, 'bypassPermissions');
+  });
+});
+
 test('synthetic user messages never become the list preview', async () => {
   await withLoop(async ({ sid, post, server }) => {
     await post([{ type: 'user', message: { role: 'user', content: '真实提示' } }]);

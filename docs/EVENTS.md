@@ -92,6 +92,24 @@ decides ownership.
 
   `usage` on the notification is the same shape as `task_progress`'s and is often the ONLY copy:
   a task that finished without ever emitting a progress frame carried its counts here alone.
+
+  **Most tasks are not background work.** In a 14596-event census (claude 2.1.280) 222 of 248
+  `task_started` were Bash commands: 47 the main thread's own foreground calls
+  (`is_backgrounded:false`, the same `tool_use_id` as a tool card already on screen) and 175 run by
+  a subagent (`owned_by_subagent:true`, inside an agent whose own card reports them through
+  `task_progress`). Drawing a card per start put 195 task cards in one session, 16 of them for
+  anything the user asked for. A transcript wants neither; the CLI's own cloud filter keeps exactly
+  these two fields of a `task_started`. Their `task_notification`s arrive too, and must not create
+  the card the start declined. A foreground command moved to the background later says so with
+  `task_updated` `patch:{is_backgrounded:true}` (two in the census, both a subagent's) — from then
+  on it is background work. 2.1.292 adds `skip_transcript:true` ("hide this from the inline
+  transcript"), `parent_task_id`, and a `run_id` per run.
+
+  **A resumed subagent re-sends `task_started` under the same `task_id`** — a SendMessage to a
+  finished agent (6 times in the census). Everything after it, progress included, is a NEW run of
+  the old id, and a client that keys cards on `task_id` alone ignores the start and then credits
+  the run to the finished card: 313 progress frames went nowhere while the card said 失败. One card
+  per run, and route each event to the newest card for its id.
 - `thinking` ○ · `thinking_tokens` ✓ (`{estimated_tokens, estimated_tokens_delta}`) — reasoning progress.
 - `notification` ○ · `os_notification` ○ · `informational` ○ — surfaced notices.
 - `status` ✓ — the same notices group, but the only use observed on the wire is compaction, as a
@@ -103,6 +121,12 @@ decides ownership.
   A failure carries `compact_error` alongside the result — `{compact_result:"failed",
   compact_error:"aborted"}` — and that is the field worth putting on screen; `compact_result` only
   ever repeats the word "failed".
+  **The permission mode rides the same subtype**: `{status:null, permissionMode:"plan"}`, sent from
+  the CLI's onPermissionModeChanged (37 of 40 `status` events in the 2.1.280 census). It lands
+  ahead of the re-sent `system:init` on a real change, but 35 of the 37 repeated the mode already
+  in force — a level to track, not a line to draw. The schema allows `permissionMode` beside any
+  status, and its enum is `compacting | requesting | null`: `requesting` is the engine's
+  `stream_request_start`, once per API request, not yet seen on the bridge.
 - `api_error` ○ · `api_retry` ○ · `permission_denied` ○ · `permission_retry` ○ — error/retry.
 - `vcs_state_changed` ✓ — `{kind:"commit"|"push", branch, cwd}`; emitted after the agent commits
   or pushes. The one side effect a reader cannot undo by reading further, so it is worth a line.
@@ -134,6 +158,12 @@ decides ownership.
 ```
 Iterate `message.content`: `text` blocks are prose; `tool_use` blocks (with `id`) are pending tool
 calls; `thinking` blocks are reasoning.
+
+**An API failure arrives as an `assistant` message too**, and only the envelope says so:
+`is_api_error_message:true`, `error:"rate_limit"`, `message.model:"<synthetic>"`, one text block
+reading `API Error: Request rejected (429) · …`. Rendered as prose it reads as Claude saying it. The
+`result` closing that turn is `{subtype:"success", is_error:true, terminal_reason:"api_error",
+api_error_status:429}` — `subtype` alone does not tell a client the turn failed.
 
 ### `user` (replay) — echo of a user turn / tool results ✓
 ```json
@@ -250,8 +280,9 @@ The three answers, which differ on the wire and not just in wording:
 An approved `tool_result` repeats **the entire plan back** (`## Approved Plan:\n…`), so a client
 must not render that text under the card it already drew the plan on.
 
-**A permission-mode change is announced by re-sending `system:init`.** There is no event of its
-own — `permission_mode_changed` exists in the bundle but is OTel telemetry, not wire traffic. The
+**A permission-mode change is announced by re-sending `system:init`** — and, on 2.1.280, first by a
+`system:status` carrying `permissionMode` (see `status` above). There is no event of its own —
+`permission_mode_changed` exists in the bundle but is OTel telemetry, not wire traffic. The
 re-sent init carries the new `permissionMode`, and on a `/rc` session it carries **`cwd:""` and
 `tools:[]`**, so a client that overwrites those fields unconditionally blanks out what it already
 knew. Observed sequence for one plan cycle: `init(plan)` on entry → the ask → `init(default)` or
@@ -315,8 +346,9 @@ An auto-approved tool (safe, in-workdir) skips steps 2–3. A `deny` short-circu
   `control_cancel_request` too, or the modal outlives the request. An ask carrying
   `requires_user_interaction` is the exception and must NOT get this modal: `AskUserQuestion` is a
   question card and `ExitPlanMode` is a plan card, both inline (see **Plan mode** above).
-- **Permission mode**: seeded from `system:init` and updated by the same payload being re-sent —
-  guard every field against the empty `cwd`/`tools` a re-sent init carries.
+- **Permission mode**: seeded from `system:init` and updated by the same payload being re-sent, or
+  by `system:status`'s `permissionMode` — guard every field against the empty `cwd`/`tools` a
+  re-sent init carries.
 - **Status chips**: `system:post_turn_summary`, `system:task_*`, `system:thinking_tokens`,
   `system:api_error`/`permission_denied`.
 - **Session bootstrap**: `system:init` → tool list, model, permission mode.
