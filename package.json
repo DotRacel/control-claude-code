@@ -17,7 +17,7 @@
   "bugs": "https://github.com/DotRacel/control-claude-code/issues",
   "license": "PolyForm-Noncommercial-1.0.0",
   "engines": {
-    "node": ">=22"
+    "node": "^22.23.4 || ^24.22.1 || ^26.12.1"
   },
   "bin": {
     "control-claude": "dist/cli.mjs"

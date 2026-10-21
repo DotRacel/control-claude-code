@@ -24,6 +24,11 @@ Currently tested on Linux and macOS.
 
 ## Install
 
+Requires Node.js 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x). These versions include the
+[October 2026 security fixes](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases),
+including the Brotli decoder remote code execution fix. Upgrade the host's Node.js when updating
+the CLI too. For source development, run `nvm install && nvm use` to use the version in `.nvmrc`.
+
 ```bash
 npm i -g control-claude-code
 ```
@@ -67,6 +72,15 @@ INVITE_CODE=<invite code> docker compose up -d
 
 The server listens on `:8787` by default — change it as needed. If the `INVITE_CODE` environment
 variable is not set, registration is disabled.
+
+To update an existing deployment, pull the new image and recreate the app container, keeping the
+database volume:
+
+```bash
+docker compose pull app
+docker compose up -d --no-deps app
+docker compose exec app node --version  # v24.22.1
+```
 
 ## Docs & development
 

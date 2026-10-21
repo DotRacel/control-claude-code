@@ -24,6 +24,11 @@
 
 ## 安装
 
+需要 Node.js 22.23.4+（22.x）、24.22.1+（24.x）或 26.12.1+（26.x）。这些版本包含
+[2026 年 10 月安全修复](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases)，
+包括 Brotli 解码器远程代码执行漏洞修复。升级 CLI 时也请升级宿主机的 Node.js。
+源码开发可运行 `nvm install && nvm use` 使用 `.nvmrc` 指定的版本。
+
 ```bash
 npm i -g control-claude-code
 ```
@@ -63,6 +68,14 @@ INVITE_CODE=<注册邀请码> docker compose up -d
 ```
 
 服务器默认部署到 `:8787`，请视需求自行修改。如果不设定环境变量 `INVITE_CODE`，注册将会被关闭。
+
+更新已有部署时，请拉取新镜像并重建应用容器（保留数据库卷）：
+
+```bash
+docker compose pull app
+docker compose up -d --no-deps app
+docker compose exec app node --version  # v24.22.1
+```
 
 ## 文档与开发
 

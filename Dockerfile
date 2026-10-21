@@ -6,8 +6,11 @@
 # Build: docker build -t ccc .
 # Run:   docker compose up -d      (see docker-compose.yml for the database wiring)
 
+# Security baseline: October 2026 fixes (including CVE-2026-111497). Keep in sync with .nvmrc.
+ARG NODE_VERSION=24.22.1
+
 # ── stage 1: the mobile SPA ────────────────────────────────────────────────────────────────────
-FROM node:24-alpine AS web
+FROM node:${NODE_VERSION}-alpine AS web
 WORKDIR /build
 # Copy manifests first so the dependency layer survives edits to the app source.
 COPY web/package.json web/package-lock.json ./
@@ -24,7 +27,7 @@ COPY src/ /src/
 RUN npx vite build
 
 # ── stage 2: the server ────────────────────────────────────────────────────────────────────────
-FROM node:24-alpine
+FROM node:${NODE_VERSION}-alpine
 WORKDIR /app
 
 # `pg` is the server's ONLY third-party dependency — everything else it imports is a node: builtin.
