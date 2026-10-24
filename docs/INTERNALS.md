@@ -145,6 +145,14 @@ exactly as before. That is every gate in every profile, so it was re-verified 17
 profile's floor (2.1.229/.238/.239/.248) and across .273/.274/.280–.283, plus the spawn chain end to
 end on .283.
 
+2.1.309 moved the `dispatch.trust` call past its search window again. Extra imports, temp-directory
+validation and GrowthBook initialization put the unchanged `let p=await i(r)` call at +1023 from
+`preflightTrustedDeviceBlocking:` on .309 and .310, beyond `windowFwd:900`. The SPLIT gate's window
+is now 1600; its alias, breakpoint and rebind are unchanged, so `chunked-dispatch` is verified
+through 2.1.310 without a new profile. All 17 gates locate on .309/.310 and every profile's floor
+(.229/.238/.239/.248); on .310 the trust gate hits and rebinds, environment registration reaches
+the local stub, and the full spawn chain reaches the child's data-plane WebSocket connection.
+
 Selection is **optimistic and never refuses on the version number**: an unknown-newer claude gets
 the newest profile, an unknown-older one gets the oldest (logged as `optimistic-newer` /
 `optimistic-older`). A wrong guess degrades to a loud, specific "gate X did not locate" — never a

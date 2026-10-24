@@ -130,9 +130,12 @@ export const PROFILES: InjectionProfile[] = [
     // 2.1.283 moved no gate at all: a new daemon helper also destructures `checkBridgeMinVersion:`,
     // and the headless locator now takes the first anchor hit a gate's whole shape resolves against
     // instead of the first hit. Same gate set, so no new profile.
+    //
+    // 2.1.309 pushed the trust call to +1023 past its anchor with extra imports and startup
+    // checks. Widening windowFwd (900→1600) covers it without changing the gate set or rebind.
     id: 'chunked-dispatch',
     since: '2.1.248',
-    verifiedThrough: '2.1.283',
+    verifiedThrough: '2.1.310',
     gates: headlessGates({
       oauth: GATE_DISPATCH_OAUTH_SPLIT,
       policy: GATE_DISPATCH_POLICY_SPLIT,

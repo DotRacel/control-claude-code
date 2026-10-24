@@ -221,11 +221,15 @@ export const GATE_DISPATCH_POLICY_SPLIT: GateSpec = {
 // between the guard and its check (`let p=await r(n);if(i(),p)…exitWithError`). The `\}` that ended
 // Z's regex now meets a `,` instead (alias-not-found partial={}), so Z ends at `[,}]` like E and G
 // already do. The guard, bpSubstr and rebind are unchanged; the new call only prints a held notice.
+//
+// 2.1.309 added imports and startup checks (temp-dir validation and GrowthBook initialization)
+// before the same `let p=await i(r)` guard. On 2.1.310 the breakpoint is +1023 from the anchor,
+// past windowFwd:900. Leave room for the whole call; aliases, pause point and rebind stay the same.
 export const GATE_DISPATCH_TRUST_SPLIT: GateSpec = {
   id: 'dispatch.trust',
   windowAnchor: 'preflightTrustedDeviceBlocking:',
   windowBack: 0,
-  windowFwd: 900,
+  windowFwd: 1600,
   aliases: { Z: 'preflightTrustedDeviceBlocking:([\\w$]+)[,}]' },
   bpSubstr: '=await ${Z}(',
   rebinds: ['${Z}=async function(){return null}'],

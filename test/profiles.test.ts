@@ -80,7 +80,8 @@ test('selectProfile: exact matches within each profile range', () => {
   // and dispatch.trust drifts were window-edge widens (windowBack/windowFwd), not set changes —
   // and 2.1.282, whose extra destructure key after preflightTrustedDeviceBlocking widened Z's regex,
   // and 2.1.283, whose second `checkBridgeMinVersion:` was a shared-locator fix, not a set change.
-  for (const v of ['2.1.248', '2.1.250', '2.1.251', '2.1.270', '2.1.272', '2.1.274', '2.1.282', '2.1.283']) {
+  // 2.1.309/.310 keep the same gates after another trust-call window widen.
+  for (const v of ['2.1.248', '2.1.250', '2.1.251', '2.1.270', '2.1.272', '2.1.274', '2.1.282', '2.1.283', '2.1.300', '2.1.309', '2.1.310']) {
     const { profile, note } = selectProfile(v);
     assert.equal(profile.id, 'chunked-dispatch', `${v} → chunked-dispatch`);
     assert.equal(note, 'exact');
