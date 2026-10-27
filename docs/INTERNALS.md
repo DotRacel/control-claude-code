@@ -325,15 +325,15 @@ Unlike headless, the REPL bridge spawns **no child**: the interactive process cr
 code-session and connects the SSE data-plane itself. Two extra server endpoints back it:
 `POST /v1/code/sessions` (createCodeSession, owned by 凭证A) and
 `POST /v1/code/sessions/{id}/bridge` (fetchRemoteCredentials → `worker_jwt` = the session's
-ingress token). Injection rebinds **seven** connect-path gates (each breakpoint removed after the first hit —
-hot TUI paths): enable the command (`isBridgeEnabled` kill-switch → true); redirect the
+ingress token). Injection rebinds **eight** connect-path gates (hot TUI breakpoints are removed
+after the first hit; per-call locals use sticky breakpoints): enable the command (`isBridgeEnabled` kill-switch → true); redirect the
 base-url/token overrides → our URL / 凭证A; clear the command preflight (disabled-reason +
-trusted-device); inject a synthetic **org UUID** (a BYOK account has none — this was the real
+trusted-device); allow the redirected bridge's organization-policy check; inject a synthetic **org UUID** (a BYOK account has none — this was the real
 blocker); satisfy the transport init's OAuth check; and let an `http://` base URL past the scheme
 check, for a self-hosted server on a LAN. A relayed web message is treated as
 **owner** (bridgeOrigin), not a peer — no `client_platform` hack needed here.
 
-- `node test/probe-interactive.ts` — asserts all nine gates locate against the installed claude.
+- `node test/probe-interactive.ts` — asserts all ten gates locate against the installed claude.
 - `bash test/e2e-interactive.sh` — the full loop through tmux: inject → `/rc` → session on the
   server → web message → reply, checking owner semantics. Also captures the pane twice, once with
   `-e`, which is how the QR's colours below are checked.
@@ -341,6 +341,31 @@ check, for a self-hosted server on a LAN. A relayed web message is treated as
   + data-plane auth).
 
 Run: `node src/control-cli.ts` (log in on first run), then type `/rc` in the TUI.
+
+### Team logins and organization policy
+
+The native service requires a Team/Enterprise Owner to enable Remote Control in
+[Claude Code admin settings](https://code.claude.com/docs/en/remote-control#troubleshooting).
+In our redirected bridge, `int.enabled` already skips the command's disabled-reason check,
+but initialization separately calls `isPolicyAllowed("allow_remote_control")` (or, in newer
+builds, `policyDenyKind`, which delegates to it). BYOK has no organization policy, hiding this
+missing injection point; a Team login can instead receive “Contact your organization admin
+for access.” The preflight's imported bindings have also been read-only since the chunk split,
+so rebinding those consumer imports cannot cover this check.
+
+`int.policy` resolves `isPolicyAllowed` to its defining module and breaks immediately after its
+cache read, where the result is an initialized, writable local. Only the `allow_remote_control`
+call gets a copied snapshot with that restriction allowed. It supports both the old restrictions
+map and the newer response object, including an unloaded cache. The original cache and other
+policy decisions are unchanged. A sticky conditional breakpoint covers reconnects and policy
+rechecks without pausing unrelated policy queries. JSC requires `options.condition`, rather
+than CDP's top-level `condition`, when setting that breakpoint.
+
+Regression fixtures reproduce denied Team policy, both cache shapes, null cache, frozen shared
+objects, and repeated calls in `test/interactive-policy.test.ts` (part of `npm test`). All 18
+gates locate on 2.1.229/.238/.239/.248/.309/.310; on .310 the real inspector rebind also passes
+with an in-memory denied-policy fixture (remote control allowed, web fetch still denied).
+This does not constitute an end-to-end check using a real Team account.
 
 ### The link `/rc` prints, and its QR
 

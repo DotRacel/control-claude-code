@@ -675,7 +675,7 @@ export function buildLocatorExpr(globalKey: string, gates: GateSpec[] = GATES): 
 //   isBridgeEnabled      → kill-switch  `OOo()`  ⇒ always-true (the /remote-control command enables)
 //   getBridgeBaseUrl     → override     `D7e()`  ⇒ our URL
 //   getBridgeAccessToken → override     `L7e()`  ⇒ our token (凭证A)
-// then four more that unblock the connect path (preflight / replinit / orguuid / httpscheme), and
+// then five more that unblock the connect path (policy / preflight / replinit / orguuid / httpscheme), and
 // finally two that fix what the user is SHOWN once it works (weburl / qrnudge).
 // Breakpoints sit at each consumer's function-body entry; those are hot paths under the TUI, so
 // gate-rebind REMOVES each breakpoint after the first hit (headless gates sit on one-shot paths).
@@ -687,6 +687,7 @@ export interface InteractiveGateSpec {
   rebindRe: string; // regex on the located function's body; each capture group = a name to rebind
   rebindValues: string[]; // rebindValues[i] is bound to capture group i+1 (after ${URL}/${TOKEN} fill)
   bpAnchor?: string; // if set, breakpoint at this substring inside the body (${N} = capture group N+1); else at the function-body entry
+  bpCondition?: string; // optional inspector condition; ${N} uses the same capture groups
   // Keep the breakpoint after the first hit. Connect-time gates rebind *locals*
   // (`ie`, `le`, one-shot String.prototype) that are recreated on every `/rc`.
   sticky?: boolean;
@@ -699,6 +700,26 @@ export const INTERACTIVE_GATES: InteractiveGateSpec[] = [
   { id: 'int.baseurl', locate: { exportName: 'getBridgeBaseUrl' }, rebindRe: '\\)\\{return ([\\w$]+)\\(\\)\\?\\?', rebindValues: ['function(){return ${URL}}'] },
   // getBridgeAccessToken (C4) = L7e()??… — rebind override L7e to our token.
   { id: 'int.token', locate: { exportName: 'getBridgeAccessToken' }, rebindRe: '\\)\\{let [\\w$]+=([\\w$]+)\\(\\)', rebindValues: ['function(){return ${TOKEN}}'] },
+  // Team logins have an organization policy even when the bridge points at our server.
+  // init-repl-bridge checks it independently of getBridgeDisabledReason / int.enabled, and
+  // later policy-change checks consult it again. Patch the writable cache-result LOCAL in
+  // isPolicyAllowed's defining module, not a read-only import in a consumer. Only the
+  // allow_remote_control invocation gets a copy with that restriction allowed; the cached
+  // object, other policy keys, and the user's on-disk organization settings stay untouched.
+  // Older builds read a restrictions map here, newer builds read the response containing it;
+  // supply both shapes. Sticky because the local is recreated on every policy check.
+  {
+    id: 'int.policy',
+    locate: { exportName: 'isPolicyAllowed' },
+    rebindRe: 'function [\\w$]+\\(([\\w$]+)\\)\\{let ([\\w$]+)=[\\w$]+\\(\\);if\\(',
+    bpAnchor: 'if(',
+    bpCondition: '${0}==="allow_remote_control"',
+    rebindValues: [
+      '${0}',
+      '(${0}==="allow_remote_control"?Object.assign({compliance_taints:[]},${1},{allow_remote_control:{allowed:!0},restrictions:Object.assign({},${1}&&${1}.restrictions,{allow_remote_control:{allowed:!0}})}):${1})',
+    ],
+    sticky: true,
+  },
   // REPL-bridge PREFLIGHT (Aqi): before connecting it checks, in order, getBridgeDisabledReason
   // (NOo), a second disabled-reason (iii), the login check `if(!getBridgeAccessToken())` — which
   // int.token's L7e rebind already satisfies (returns 凭证A ⇒ truthy), so we must NOT touch it —
@@ -968,7 +989,8 @@ export function buildInteractiveLocatorExpr(globalKey: string, gates: Interactiv
             bpIdx = s.indexOf("){", di) + 2;
           }
           var lc = absLineCol(at.url, bpIdx);
-          out.push({ id: G.id, file: at.url, alias: alias, names: names, line: lc.line, col: lc.col });
+          var condition = G.bpCondition && G.bpCondition.replace(/\\$\\{(\\d+)\\}/g, function(_, n){ return names[+n]; });
+          out.push({ id: G.id, file: at.url, alias: alias, names: names, line: lc.line, col: lc.col, condition: condition });
         }
         globalThis[${K}] = { main: MAIN, gates: out };
       } catch (e) { globalThis[${K}] = "ERR:" + (e && e.message || e); }

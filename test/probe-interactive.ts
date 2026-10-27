@@ -5,6 +5,7 @@
  *
  * Run: node test/probe-interactive.ts
  */
+import { INTERACTIVE_GATES } from '../src/injector/anchors.ts';
 import { launchInteractiveWithGatesRebound } from '../src/injector/gate-rebind.ts';
 
 async function main() {
@@ -26,5 +27,5 @@ async function main() {
   h.kill();
   setTimeout(() => process.exit(allLocated ? 0 : 1), 200);
 }
-const INTERACTIVE_EXPECTED = 9;
+const INTERACTIVE_EXPECTED = INTERACTIVE_GATES.length;
 main().catch((e) => { console.error('[probe-interactive] fatal:', e); process.exit(1); });

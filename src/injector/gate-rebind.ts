@@ -422,7 +422,8 @@ export async function launchInteractiveWithGatesRebound(opts: InteractiveLaunchO
         // Per-gate URL: since 2.1.243 the app is split into chunks and gates land in
         // different ones. Pre-split bundles report MAIN for every gate, so this is the same
         // call it always was there.
-        const sb = await ic.send('Debugger.setBreakpointByUrl', { url: g.file || MAIN, lineNumber: g.line, columnNumber: g.col }).catch((e) => ({ __e: e.message }));
+        // JSC puts conditions under BreakpointOptions (CDP's top-level condition is ignored).
+        const sb = await ic.send('Debugger.setBreakpointByUrl', { url: g.file || MAIN, lineNumber: g.line, columnNumber: g.col, ...(g.condition ? { options: { condition: g.condition } } : {}) }).catch((e) => ({ __e: e.message }));
         if (sb && sb.breakpointId) rep.breakpointId = sb.breakpointId;
         else { rep.located = false; rep.error = 'setBreakpoint-failed'; }
       }
