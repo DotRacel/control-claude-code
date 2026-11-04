@@ -32,6 +32,7 @@ import {
   GATE_BRIDGEMAIN_TOKENURL_SYNC,
   GATE_BRIDGEMAIN_TOKENURL_ASYNC,
   INTERACTIVE_GATES,
+  INTERACTIVE_GATES_QR_RENDERER,
 } from './anchors.ts';
 
 export interface InjectionProfile {
@@ -52,9 +53,9 @@ export interface InjectionProfile {
  *
  * Only STRUCTURAL drift earns a profile. A guard that merely gained a parameter, or moved further
  * from its window anchor, is absorbed by widening the gate in anchors.ts — one gate then keeps
- * covering every version. So far exactly two gates have branched, and the interactive `/rc` gates
- * and the child `--sdk-url` locator have never needed to: all three profiles share
- * `INTERACTIVE_GATES`.
+ * covering every version. Interactive gates remain shared through 2.1.316; the 2.1.317
+ * profile moves QR injection to the renderer and URL injection to its defining module.
+ * The child `--sdk-url` locator remains shared by every profile.
  */
 export const PROFILES: InjectionProfile[] = [
   {
@@ -135,7 +136,7 @@ export const PROFILES: InjectionProfile[] = [
     // checks. Widening windowFwd (900→1600) covers it without changing the gate set or rebind.
     id: 'chunked-dispatch',
     since: '2.1.248',
-    verifiedThrough: '2.1.310',
+    verifiedThrough: '2.1.316',
     gates: headlessGates({
       oauth: GATE_DISPATCH_OAUTH_SPLIT,
       policy: GATE_DISPATCH_POLICY_SPLIT,
@@ -143,6 +144,21 @@ export const PROFILES: InjectionProfile[] = [
       tokenUrl: GATE_BRIDGEMAIN_TOKENURL_ASYNC,
     }),
     interactiveGates: INTERACTIVE_GATES,
+  },
+  {
+    // 2.1.317 removed upgradeNudge from bridge_status messages and their renderer.
+    // Headless gates are unchanged. QR moves to the rendered element; the URL override
+    // moves to its defining module initialization so a read-only import cannot block it.
+    id: 'rendered-qr',
+    since: '2.1.317',
+    verifiedThrough: '2.1.318',
+    gates: headlessGates({
+      oauth: GATE_DISPATCH_OAUTH_SPLIT,
+      policy: GATE_DISPATCH_POLICY_SPLIT,
+      trust: GATE_DISPATCH_TRUST_SPLIT,
+      tokenUrl: GATE_BRIDGEMAIN_TOKENURL_ASYNC,
+    }),
+    interactiveGates: INTERACTIVE_GATES_QR_RENDERER,
   },
 ];
 

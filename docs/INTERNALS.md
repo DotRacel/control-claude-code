@@ -78,7 +78,8 @@ is absorbed by widening the one gate instead, so it never reaches this table. Kn
 | `legacy` | 2.1.229 – 2.1.237 | inline in the entry near `cli_bridge_path`; trust is two functions (`enrollTrustedDeviceIfNeeded` + `getTrustedDeviceUnenrolledReason`) | one getter: `if(!M())` |
 | `preflight` | 2.1.238 only | inline; trust merged into one function `preflightTrustedDeviceBlocking` | one getter: `if(!M())` |
 | `async-token` | 2.1.239 – 2.1.247 | inline; same as `preflight` | two getters, chosen at runtime: `if(!(U?await A(r):M()))` — both rebound |
-| `chunked-dispatch` | ≥ 2.1.248 | **relocated**: the whole remote-control branch moved out of the entry into `chunk-77n86n8h.js`, regrouped into `refuseRemoteControlLocally` / `refuseRemoteControlIneligible` / `startRemoteControl`. Each gate anchors on a colon-destructure key in that chunk; policy neutralizes the shared `exitWithError` to cover all three eligibility checks at once | same as `async-token` |
+| `chunked-dispatch` | 2.1.248 – 2.1.316 | **relocated**: the whole remote-control branch moved out of the entry into `chunk-77n86n8h.js`, regrouped into `refuseRemoteControlLocally` / `refuseRemoteControlIneligible` / `startRemoteControl`. Each gate anchors on a colon-destructure key in that chunk; policy neutralizes the shared `exitWithError` to cover all three eligibility checks at once | same as `async-token` |
+| `rendered-qr` | ≥ 2.1.317 | same as `chunked-dispatch`; interactive QR moves to the renderer and URL override to its defining module | same as `async-token` |
 
 A one-version profile like `preflight` is the expected shape, not a smell: 2.1.238 moved one guard
 and 2.1.239 moved the next one over. `chunked-dispatch` is the opposite shape — 2.1.248's re-chunk
@@ -86,7 +87,11 @@ moved *all three* dispatch guards at once (a genuine structural relocation, so o
 the same release gave the interactive exports a **bare-export** defining chunk. That last part is
 not a profile: it's a fix to the shared `/rc` export-resolver (`localFor` learned the `export{n}`
 form, and locals spliced into locator regexes are now `$`-escaped — `getBridgeBaseUrl` minifies to
-`$ae` on 2.1.248). The interactive gate set is unchanged across every profile.
+`$ae` on 2.1.248). The interactive gate set stays shared through 2.1.316. A `rendered-qr` profile starts at
+2.1.317, keeping the same headless gates and replacing `int.qrnudge` and the URL override binding: `upgradeNudge`
+was removed from both the status message and its renderer. The URL override is resolved
+to its defining module and rebound at its first executable statement, after static imports
+and before any consumer call; imported bindings in a consumer are read-only.
 
 2.1.263 is a second fix of that class, on the child `--sdk-url` locator. Nothing about the guard
 changed; a *different* function grew a second `("--sdk-url")` spelling, in a chunk that gets listed
@@ -380,12 +385,17 @@ carrying a session id our server minted.
   renderer cross-checks `message.url` against `store.replBridgeSessionUrl` and renders nothing if
   they differ; both read this one value. It also fixes claude's own "Show QR code" dialog, the
   `/status` footer fallback, and the `Claude-Session:` git commit trailer, all for free.
-- **`int.qrnudge`** draws the QR. It does *not* replace the message factory: that factory's second
+- **`int.qrnudge`** draws the QR. Through 2.1.316 it does *not* replace the message factory: that factory's second
   parameter is `upgradeNudge`, which the only call site leaves undefined and the renderer draws as
   an optional second row inside a `width:999` box — so multi-line content neither wraps nor needs a
   renderer patch. A breakpoint at the factory's body entry is *before* that parameter is read, so
   assigning the **parameter** is enough, the live invocation picks it up, and the message's shape
   stays entirely claude's.
+  From 2.1.317 the field and its renderer row are gone. The new variant pauses at the status
+  renderer's final return and replaces only its return local with a cloned element tree, adding
+  a QR Text below the original link inside the existing column. The message, URL and compiler
+  cache are untouched. The sticky breakpoint covers first render, cached renders and reconnects;
+  unavailable encoders, narrow terminals and foreign URLs leave the original element unchanged.
 
 The encoder (`src/injector/qr.ts`) is [Kazuhiko Arase's qrcode-generator][qrgen], vendored verbatim
 as a string and evaluated into the target during the `?wait=1` pause. It has to run over there: the

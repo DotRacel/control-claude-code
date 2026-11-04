@@ -684,6 +684,10 @@ export interface InteractiveGateSpec {
   // How to find the function to breakpoint: by its export-table alias, or by a string anchor
   // inside it plus the declaration keyword to walk back to.
   locate: { exportName: string } | { anchorStr: string; declKeyword: string };
+  /** Source after a string anchor needed to include the rebind site (default 120). */
+  bodyForward?: number;
+  /** Rebind a defining module's hoisted function before its first consumer can call it. */
+  atModuleInit?: boolean;
   rebindRe: string; // regex on the located function's body; each capture group = a name to rebind
   rebindValues: string[]; // rebindValues[i] is bound to capture group i+1 (after ${URL}/${TOKEN} fill)
   bpAnchor?: string; // if set, breakpoint at this substring inside the body (${N} = capture group N+1); else at the function-body entry
@@ -872,6 +876,40 @@ export const INTERACTIVE_GATES: InteractiveGateSpec[] = [
   },
 ];
 
+// 2.1.317 removed upgradeNudge from both the message factory and its renderer.
+// Add the QR to the renderer's completed element instead. Only the return local changes:
+// the message URL, hooks, link and React compiler cache keep their original values.
+// Clone the existing column and Text element so their types come from this module, not
+// another chunk's read-only imports. A sticky return breakpoint also covers cached renders
+// and reconnects, without appending another QR to the cached element on each render.
+export const GATE_INT_QR_RENDERER: InteractiveGateSpec = {
+  id: 'int.qrnudge',
+  locate: { anchorStr: 'children:["/remote-control is active",', declKeyword: 'function' },
+  bodyForward: 600,
+  rebindRe: 'message:([\\w$]+),addMargin:[\\w$]+[^]*?children:\\["/remote-control is active",[^]*?width:999,children:\\[[\\w$]+,[\\w$]+\\][^]*?return ([\\w$]+)\\}',
+  bpAnchor: 'return ${1}',
+  rebindValues: [
+    '${0}',
+    '(function(_root,_u){try{var _qr=globalThis.__cccQr(_u,{origin:${URL},maxWidth:((typeof process!=="undefined"&&process.stdout&&process.stdout.columns)||80)-6});if(!_qr)return _root;var _children=_root.props.children,_col=_children[1],_text=_col.props.children;var _qrText=Object.assign({},_text,{key:"ccc-qr",props:Object.assign({},_text.props,{children:_qr})});var _newCol=Object.assign({},_col,{props:Object.assign({},_col.props,{children:[_text,_qrText]})});return Object.assign({},_root,{props:Object.assign({},_root.props,{children:[_children[0],_newCol]})})}catch(_e){return _root}})(${1},${0}.url)',
+  ],
+  sticky: true,
+};
+
+// The URL override became an imported binding in newer split bundles. Rebind its
+// defining module's hoisted declaration during module initialization, before even
+// the first getBridgeBaseUrl() call; consumer imports themselves are read-only.
+export const GATE_INT_BASEURL_MODULE: InteractiveGateSpec = {
+  id: 'int.baseurl',
+  locate: { exportName: 'getBridgeBaseUrlOverride' },
+  rebindRe: '^function ([\\w$]+)\\(\\)',
+  atModuleInit: true,
+  rebindValues: ['function(){return ${URL}}'],
+};
+
+export const INTERACTIVE_GATES_QR_RENDERER = INTERACTIVE_GATES.map((gate) =>
+  gate.id === 'int.qrnudge' ? GATE_INT_QR_RENDERER : gate.id === 'int.baseurl' ? GATE_INT_BASEURL_MODULE : gate,
+);
+
 /**
  * Locator for the interactive gates. For each: resolve the consumer's minified alias from the
  * export table, find its `function <alias>(` definition, extract the underlying override alias
@@ -951,11 +989,16 @@ export function buildInteractiveLocatorExpr(globalKey: string, gates: Interactiv
             var di = s.indexOf("function " + local + "(");
             if (di >= 0) return { url: url, s: s, alias: local, defIdx: di };
             var le = reEsc(local);
-            var im = new RegExp("import\\\\{[^}]*[{,]([\\\\w$]+) as " + le + "[,}][^}]*\\\\}from\\"([^\\"]+)\\"").exec(s);
-            if (im) { url = im[2]; s = sourceText(url); name = im[1]; continue; }
-            // An import that does not rename: the next file exports it under the same name.
-            var im2 = new RegExp("import\\\\{[^}]*[{,]" + le + "[,}][^}]*\\\\}from\\"([^\\"]+)\\"").exec(s);
-            if (im2) { url = im2[1]; s = sourceText(url); name = local; continue; }
+            // Parse the import list separately: an alias may be its FIRST or LAST item,
+            // including a singleton import. Consuming both braces around a value regex
+            // accidentally excluded those edges in the old resolver.
+            var imports = /import\\{([^}]*)\\}from"([^"]+)"/g, im, edge = null;
+            while ((im = imports.exec(s)) !== null) {
+              var imported = new RegExp("(?:^|,)([\\\\w$]+) as " + le + "(?:,|$)").exec(im[1]);
+              if (imported) { edge = { url: im[2], name: imported[1] }; break; }
+              if (new RegExp("(?:^|,)" + le + "(?:,|$)").test(im[1])) { edge = { url: im[2], name: local }; break; }
+            }
+            if (edge) { url = edge.url; s = sourceText(url); name = edge.name; continue; }
             return null;
           }
           return null;
@@ -976,12 +1019,17 @@ export function buildInteractiveLocatorExpr(globalKey: string, gates: Interactiv
             alias = dm ? dm[1] : null;
           }
           if (di < 0) { out.push({ id: G.id, error: "def-not-found", alias: alias, file: at && at.url }); continue; }
-          var body = G.locate.exportName ? s.slice(di, di + 900) : s.slice(di, ai + G.locate.anchorStr.length + 120);
+          var body = G.locate.exportName ? s.slice(di, di + 900) : s.slice(di, ai + G.locate.anchorStr.length + (G.bodyForward ?? 120));
           var rm = new RegExp(G.rebindRe).exec(body);
           if (!rm) { out.push({ id: G.id, error: "rebind-re-not-found", alias: alias, file: at.url, body: body.slice(0, 160) }); continue; }
           var names = rm.slice(1);
           var bpIdx;
-          if (G.bpAnchor) {
+          if (G.atModuleInit) {
+            // Native split chunks begin with static imports, then executable module code.
+            // Stop at that first statement, where function declarations are already hoisted.
+            var prefix = /^(?:\\s+|\\/\\/[^\\n]*(?:\\n|$)|\\/\\*[^]*?\\*\\/|import(?!\\s*\\()[^;]*;)*/.exec(s)[0];
+            bpIdx = prefix.length;
+          } else if (G.bpAnchor) {
             var ba = G.bpAnchor.replace(/\\$\\{(\\d+)\\}/g, function(_, n){ return names[+n]; });
             var bi = body.indexOf(ba);
             bpIdx = bi >= 0 ? di + bi : s.indexOf("){", di) + 2;

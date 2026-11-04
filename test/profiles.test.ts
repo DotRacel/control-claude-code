@@ -81,7 +81,7 @@ test('selectProfile: exact matches within each profile range', () => {
   // and 2.1.282, whose extra destructure key after preflightTrustedDeviceBlocking widened Z's regex,
   // and 2.1.283, whose second `checkBridgeMinVersion:` was a shared-locator fix, not a set change.
   // 2.1.309/.310 keep the same gates after another trust-call window widen.
-  for (const v of ['2.1.248', '2.1.250', '2.1.251', '2.1.270', '2.1.272', '2.1.274', '2.1.282', '2.1.283', '2.1.300', '2.1.309', '2.1.310']) {
+  for (const v of ['2.1.248', '2.1.250', '2.1.251', '2.1.270', '2.1.272', '2.1.274', '2.1.282', '2.1.283', '2.1.300', '2.1.309', '2.1.310', '2.1.316']) {
     const { profile, note } = selectProfile(v);
     assert.equal(profile.id, 'chunked-dispatch', `${v} → chunked-dispatch`);
     assert.equal(note, 'exact');
@@ -103,6 +103,16 @@ test('selectProfile: exact matches within each profile range', () => {
     const tokenUrl = profile.gates.find((g) => g.id === 'bridgeMain.tokenurl')!;
     assert.deepEqual(Object.keys(tokenUrl.aliases).sort(), ['A', 'M', 'P', 'U']);
   }
+  for (const v of ['2.1.317', '2.1.318']) {
+    const { profile, note } = selectProfile(v);
+    assert.equal(profile.id, 'rendered-qr');
+    assert.equal(note, 'exact');
+    const previous = selectProfile('2.1.316').profile;
+    assert.deepEqual(profile.gates, previous.gates);
+    const shared = (g: { id: string }) => !['int.qrnudge', 'int.baseurl'].includes(g.id);
+    assert.deepEqual(profile.interactiveGates.filter(shared), previous.interactiveGates.filter(shared));
+    assert.equal(profile.interactiveGates.find((g) => g.id === 'int.qrnudge')!.bpAnchor, 'return ${1}');
+  }
 });
 
 test('the profile boundaries are contiguous — no version falls between two profiles', () => {
@@ -120,7 +130,7 @@ test('the profile boundaries are contiguous — no version falls between two pro
 
 test('selectProfile: optimistic-newer picks the newest profile for unknown-newer versions', () => {
   const { profile, note } = selectProfile('2.1.999');
-  assert.equal(profile.id, 'chunked-dispatch');
+  assert.equal(profile.id, 'rendered-qr');
   assert.equal(note, 'optimistic-newer');
   assert.equal(profile.id, newestProfile().id);
 });
