@@ -79,7 +79,8 @@ is absorbed by widening the one gate instead, so it never reaches this table. Kn
 | `preflight` | 2.1.238 only | inline; trust merged into one function `preflightTrustedDeviceBlocking` | one getter: `if(!M())` |
 | `async-token` | 2.1.239 – 2.1.247 | inline; same as `preflight` | two getters, chosen at runtime: `if(!(U?await A(r):M()))` — both rebound |
 | `chunked-dispatch` | 2.1.248 – 2.1.316 | **relocated**: the whole remote-control branch moved out of the entry into `chunk-77n86n8h.js`, regrouped into `refuseRemoteControlLocally` / `refuseRemoteControlIneligible` / `startRemoteControl`. Each gate anchors on a colon-destructure key in that chunk; policy neutralizes the shared `exitWithError` to cover all three eligibility checks at once | same as `async-token` |
-| `rendered-qr` | ≥ 2.1.317 | same as `chunked-dispatch`; interactive QR moves to the renderer and URL override to its defining module | same as `async-token` |
+| `rendered-qr` | 2.1.317 – 2.1.318 | same as `chunked-dispatch`; interactive QR moves to the renderer and URL override to its defining module | same as `async-token` |
+| `policy-wrapper` | ≥ 2.1.319 (verified through 2.1.322) | same as `rendered-qr`; interactive policy wraps the defining module's policy helper at `isPolicyAllowed` entry | same as `async-token` |
 
 A one-version profile like `preflight` is the expected shape, not a smell: 2.1.238 moved one guard
 and 2.1.239 moved the next one over. `chunked-dispatch` is the opposite shape — 2.1.248's re-chunk
@@ -92,6 +93,16 @@ form, and locals spliced into locator regexes are now `$`-escaped — `getBridge
 was removed from both the status message and its renderer. The URL override is resolved
 to its defining module and rebound at its first executable statement, after static imports
 and before any consumer call; imported bindings in a consumer are read-only.
+
+2.1.319 split `isPolicyAllowed` into a wrapper (`return !feedbackRefused(key) && policyAllowed(key)`)
+and an adjacent policy helper. The old unanchored policy regex happened to reach the helper on
+.319, but .321 changed its cache read from one local to a principal plus a policy local, breaking
+the match; the daily check caught this on .322. The `policy-wrapper` profile starts at .319,
+where the split first appeared. It pauses at wrapper entry and replaces the writable policy helper
+in the same defining module with a one-time wrapper: `allow_remote_control` returns true, every
+other key calls the original helper. The feedback-refusal helper, policy cache and organization
+settings stay untouched. Real inspector rebinds and repeated calls pass on .319/.321/.322;
+headless environment registration also reaches the local server on .322.
 
 2.1.263 is a second fix of that class, on the child `--sdk-url` locator. Nothing about the guard
 changed; a *different* function grew a second `("--sdk-url")` spelling, in a chunk that gets listed

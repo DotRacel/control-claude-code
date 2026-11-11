@@ -33,6 +33,7 @@ import {
   GATE_BRIDGEMAIN_TOKENURL_ASYNC,
   INTERACTIVE_GATES,
   INTERACTIVE_GATES_QR_RENDERER,
+  INTERACTIVE_GATES_POLICY_WRAPPER,
 } from './anchors.ts';
 
 export interface InjectionProfile {
@@ -55,6 +56,7 @@ export interface InjectionProfile {
  * from its window anchor, is absorbed by widening the gate in anchors.ts — one gate then keeps
  * covering every version. Interactive gates remain shared through 2.1.316; the 2.1.317
  * profile moves QR injection to the renderer and URL injection to its defining module.
+ * The 2.1.319 profile wraps isPolicyAllowed's policy helper in its defining module.
  * The child `--sdk-url` locator remains shared by every profile.
  */
 export const PROFILES: InjectionProfile[] = [
@@ -159,6 +161,21 @@ export const PROFILES: InjectionProfile[] = [
       tokenUrl: GATE_BRIDGEMAIN_TOKENURL_ASYNC,
     }),
     interactiveGates: INTERACTIVE_GATES_QR_RENDERER,
+  },
+  {
+    // 2.1.319 split isPolicyAllowed into a wrapper and a policy helper. The old regex
+    // accidentally reached that adjacent helper until 2.1.321 changed its cache read.
+    // Wrap the writable policy helper at entry to isPolicyAllowed; all other gates stay shared.
+    id: 'policy-wrapper',
+    since: '2.1.319',
+    verifiedThrough: '2.1.322',
+    gates: headlessGates({
+      oauth: GATE_DISPATCH_OAUTH_SPLIT,
+      policy: GATE_DISPATCH_POLICY_SPLIT,
+      trust: GATE_DISPATCH_TRUST_SPLIT,
+      tokenUrl: GATE_BRIDGEMAIN_TOKENURL_ASYNC,
+    }),
+    interactiveGates: INTERACTIVE_GATES_POLICY_WRAPPER,
   },
 ];
 

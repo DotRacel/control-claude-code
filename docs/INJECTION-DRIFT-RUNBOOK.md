@@ -279,6 +279,7 @@ known range to the gates that match it.
 
 | version | what moved | fix class |
 |---|---|---|
+| 2.1.319 / 2.1.321 | `isPolicyAllowed` became a feedback-refusal/policy wrapper on .319; the old regex accidentally reached the adjacent helper until .321's principal + policy cache read stopped matching (`int.policy: rebind-re-not-found`, caught on .322) | **branch** — `policy-wrapper` profile since .319; at wrapper entry, wrap the defining module's writable policy helper once, allowing only `allow_remote_control` and delegating every other key to the original helper |
 | ≤2.1.228 → 2.1.229 | embedded bundle path `/$bunfs/root/src/entrypoints/cli.js` → flattened `/$bunfs/root/cli` | read `Bun.main` at runtime, never hardcode the path (fixed for all future renames) |
 | 2.1.234 | `spawner.spawn` env-options literal grew; `windowsHide` fell past `windowFwd` | **widen** regex `env:([\w$]+)[,}]` + `windowFwd` 1200→1600 |
 | 2.1.238 | `dispatch.trust`: two trusted-device functions merged into `preflightTrustedDeviceBlocking` | **branch** — `preflight` profile, alias `Z`, rebind `→ return null` |

@@ -910,6 +910,23 @@ export const INTERACTIVE_GATES_QR_RENDERER = INTERACTIVE_GATES.map((gate) =>
   gate.id === 'int.qrnudge' ? GATE_INT_QR_RENDERER : gate.id === 'int.baseurl' ? GATE_INT_BASEURL_MODULE : gate,
 );
 
+// isPolicyAllowed became a wrapper around the feedback-refusal and policy helpers.
+// At wrapper entry, replace its writable policy helper in the same defining module. Keep the
+// original helper for every other key, including future policy changes. The feedback-refusal
+// helper and shared cache stay untouched; the one-shot replacement covers repeated checks.
+export const GATE_INT_POLICY_WRAPPER: InteractiveGateSpec = {
+  id: 'int.policy',
+  locate: { exportName: 'isPolicyAllowed' },
+  rebindRe: '^function [\\w$]+\\([\\w$]+\\)\\{return![\\w$]+\\([\\w$]+\\)&&([\\w$]+)\\([\\w$]+\\)\\}',
+  rebindValues: [
+    '(function(original){return function(key){return key==="allow_remote_control"?!0:original.apply(this,arguments)}})(${0})',
+  ],
+};
+
+export const INTERACTIVE_GATES_POLICY_WRAPPER = INTERACTIVE_GATES_QR_RENDERER.map((gate) =>
+  gate.id === 'int.policy' ? GATE_INT_POLICY_WRAPPER : gate,
+);
+
 /**
  * Locator for the interactive gates. For each: resolve the consumer's minified alias from the
  * export table, find its `function <alias>(` definition, extract the underlying override alias

@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { INTERACTIVE_GATES, buildInteractiveLocatorExpr } from '../src/injector/anchors.ts';
+import { selectProfile } from '../src/injector/profiles.ts';
 
 const gate = INTERACTIVE_GATES.find((g) => g.id === 'int.policy')!;
 
@@ -21,10 +22,10 @@ const fixtures = [
   },
 ];
 
-async function locate(source: string) {
+async function locate(source: string, spec = gate) {
   // Use the production locator, including export resolution and line/column math.
   const context = vm.createContext({ Bun: { main: '/fixture.js', file: () => ({ text: async () => source }) } });
-  vm.runInContext(buildInteractiveLocatorExpr('__policy', [gate]), context);
+  vm.runInContext(buildInteractiveLocatorExpr('__policy', [spec]), context);
   for (let i = 0; i < 100 && context.__policy === 'pending'; i++) {
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
@@ -32,6 +33,63 @@ async function locate(source: string) {
   const located = context.__policy.gates[0];
   assert.equal(located.error, undefined);
   return located;
+}
+
+for (const cacheRead of ['let $policy=readCache();', 'let principal=readPrincipal(),$policy=readCache(principal);']) {
+  test(`Team policy wrapper: preserves other verdicts, feedback refusal and cache (${cacheRead})`, async () => {
+    const spec = selectProfile('2.1.319').profile.interactiveGates.find((g) => g.id === 'int.policy')!;
+    // Measured .319 wrapper; .321/.322 add a principal read before the cache read.
+    // Cache and feedback-refusal imports are read-only; the policy helper is local.
+    const header = '// @bun @bytecode\nimport{readCache,readPrincipal,refused}from"helpers";\n';
+    const body = 'var first=$allowed("allow_remote_control");function $allowed($key){return!refused($key)&&$check($key)}' +
+      'function $feedback($key){return refused($key)&&$check($key)}' +
+      `function $check($key){${cacheRead}if(!$policy)return false;return $policy.restrictions[$key]?.allowed??false}`;
+    const source = header + body + ';var exports={isPolicyAllowed:()=>$allowed}';
+    const located = await locate(source, spec);
+    assert.deepEqual(Array.from(located.names), ['$check']);
+    assert.equal(located.line, 2);
+    const offset = located.col;
+    assert.equal(body.slice(offset, offset + 7), 'return!', 'pause at wrapper entry before the helper call');
+    assert.equal(spec.sticky, undefined, 'the replacement survives repeated calls without another pause');
+    const restrictions = Object.freeze({
+      allow_remote_control: Object.freeze({ allowed: false }),
+      allow_web_fetch: Object.freeze({ allowed: false }),
+      allow_product_feedback: Object.freeze({ allowed: true }),
+    });
+    const snapshot = Object.freeze({ restrictions });
+    let current: typeof snapshot | null = snapshot;
+    let feedbackRefused = true;
+    const globals = {
+      getCache: () => current,
+      getPrincipal: () => 'team',
+      isRefused: (key: string) => key === 'allow_product_feedback' && feedbackRefused,
+    };
+    const imports = 'const readCache=getCache,readPrincipal=getPrincipal,refused=isRefused;';
+    const original = vm.createContext({ ...globals });
+    vm.runInContext(imports + body, original);
+    assert.equal(original.first, false, 'reproduce the original refusal');
+    const rebind = '$check=' + spec.rebindValues[0].replace('${0}', '$check') + ';';
+    const injected = vm.createContext({ ...globals });
+    vm.runInContext(imports + body.slice(0, offset) + rebind + body.slice(offset), injected);
+    // Model the injector removing the breakpoint after the first hit.
+    vm.runInContext('var savedHelper=$check;$allowed=function($key){return!refused($key)&&$check($key)}', injected);
+    assert.equal(injected.first, true, 'the first invocation already uses the replacement');
+    for (let attempt = 0; attempt < 3; attempt++) {
+      assert.equal(vm.runInContext('$allowed("allow_remote_control")', injected), true);
+      for (const key of ['allow_web_fetch', 'allow_product_feedback', 'unknown_policy']) {
+        assert.equal(vm.runInContext(`$allowed(${JSON.stringify(key)})`, injected), vm.runInContext(`$allowed(${JSON.stringify(key)})`, original));
+      }
+      assert.equal(vm.runInContext('$feedback("allow_product_feedback")', injected), feedbackRefused);
+      assert.equal(vm.runInContext('$feedback("allow_remote_control")', injected), false, 'feedback-only entry still rejects this key');
+      assert.equal(vm.runInContext('$check===savedHelper', injected), true, 'the helper is wrapped just once');
+      feedbackRefused = !feedbackRefused;
+    }
+    assert.equal(current, snapshot);
+    assert.equal(restrictions.allow_remote_control.allowed, false);
+    current = null;
+    assert.equal(vm.runInContext('$allowed("allow_remote_control")', injected), true);
+    assert.equal(vm.runInContext('$allowed("allow_web_fetch")', injected), false);
+  });
 }
 
 for (const fixture of fixtures) {
