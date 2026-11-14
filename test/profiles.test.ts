@@ -113,7 +113,7 @@ test('selectProfile: exact matches within each profile range', () => {
     assert.deepEqual(profile.interactiveGates.filter(shared), previous.interactiveGates.filter(shared));
     assert.equal(profile.interactiveGates.find((g) => g.id === 'int.qrnudge')!.bpAnchor, 'return ${1}');
   }
-  for (const v of ['2.1.319', '2.1.321', '2.1.322']) {
+  for (const v of ['2.1.319', '2.1.321', '2.1.322', '2.1.323']) {
     const { profile, note } = selectProfile(v);
     assert.equal(profile.id, 'policy-wrapper');
     assert.equal(note, 'exact');
@@ -122,6 +122,19 @@ test('selectProfile: exact matches within each profile range', () => {
     const shared = (g: { id: string }) => g.id !== 'int.policy';
     assert.deepEqual(profile.interactiveGates.filter(shared), previous.interactiveGates.filter(shared));
     const policy = profile.interactiveGates.find((g) => g.id === 'int.policy')!;
+    assert.equal(policy.atModuleInit, undefined);
+    assert.equal(policy.sticky, undefined);
+  }
+  for (const v of ['2.1.324', '2.1.325']) {
+    const { profile, note } = selectProfile(v);
+    assert.equal(profile.id, 'guarded-policy-wrapper');
+    assert.equal(note, 'exact');
+    const previous = selectProfile('2.1.323').profile;
+    assert.deepEqual(profile.gates, previous.gates);
+    const shared = (g: { id: string }) => g.id !== 'int.policy';
+    assert.deepEqual(profile.interactiveGates.filter(shared), previous.interactiveGates.filter(shared));
+    const policy = profile.interactiveGates.find((g) => g.id === 'int.policy')!;
+    assert.equal(policy.rebindValues, previous.interactiveGates.find((g) => g.id === 'int.policy')!.rebindValues);
     assert.equal(policy.atModuleInit, undefined);
     assert.equal(policy.sticky, undefined);
   }
@@ -142,7 +155,7 @@ test('the profile boundaries are contiguous — no version falls between two pro
 
 test('selectProfile: optimistic-newer picks the newest profile for unknown-newer versions', () => {
   const { profile, note } = selectProfile('2.1.999');
-  assert.equal(profile.id, 'policy-wrapper');
+  assert.equal(profile.id, 'guarded-policy-wrapper');
   assert.equal(note, 'optimistic-newer');
   assert.equal(profile.id, newestProfile().id);
 });

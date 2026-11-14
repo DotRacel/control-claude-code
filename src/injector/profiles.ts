@@ -34,6 +34,7 @@ import {
   INTERACTIVE_GATES,
   INTERACTIVE_GATES_QR_RENDERER,
   INTERACTIVE_GATES_POLICY_WRAPPER,
+  INTERACTIVE_GATES_POLICY_GUARDED_WRAPPER,
 } from './anchors.ts';
 
 export interface InjectionProfile {
@@ -57,6 +58,7 @@ export interface InjectionProfile {
  * covering every version. Interactive gates remain shared through 2.1.316; the 2.1.317
  * profile moves QR injection to the renderer and URL injection to its defining module.
  * The 2.1.319 profile wraps isPolicyAllowed's policy helper in its defining module.
+ * The 2.1.324 profile preserves the additional guard before that wrapper's feedback check.
  * The child `--sdk-url` locator remains shared by every profile.
  */
 export const PROFILES: InjectionProfile[] = [
@@ -168,7 +170,7 @@ export const PROFILES: InjectionProfile[] = [
     // Wrap the writable policy helper at entry to isPolicyAllowed; all other gates stay shared.
     id: 'policy-wrapper',
     since: '2.1.319',
-    verifiedThrough: '2.1.322',
+    verifiedThrough: '2.1.323',
     gates: headlessGates({
       oauth: GATE_DISPATCH_OAUTH_SPLIT,
       policy: GATE_DISPATCH_POLICY_SPLIT,
@@ -176,6 +178,20 @@ export const PROFILES: InjectionProfile[] = [
       tokenUrl: GATE_BRIDGEMAIN_TOKENURL_ASYNC,
     }),
     interactiveGates: INTERACTIVE_GATES_POLICY_WRAPPER,
+  },
+  {
+    // 2.1.324 adds a third helper call: !guard(key) && !feedbackRefused(key) && policy(key).
+    // Only the final, writable policy helper is wrapped; both negative guards stay intact.
+    id: 'guarded-policy-wrapper',
+    since: '2.1.324',
+    verifiedThrough: '2.1.325',
+    gates: headlessGates({
+      oauth: GATE_DISPATCH_OAUTH_SPLIT,
+      policy: GATE_DISPATCH_POLICY_SPLIT,
+      trust: GATE_DISPATCH_TRUST_SPLIT,
+      tokenUrl: GATE_BRIDGEMAIN_TOKENURL_ASYNC,
+    }),
+    interactiveGates: INTERACTIVE_GATES_POLICY_GUARDED_WRAPPER,
   },
 ];
 

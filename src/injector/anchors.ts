@@ -927,6 +927,17 @@ export const INTERACTIVE_GATES_POLICY_WRAPPER = INTERACTIVE_GATES_QR_RENDERER.ma
   gate.id === 'int.policy' ? GATE_INT_POLICY_WRAPPER : gate,
 );
 
+// 2.1.324 adds another negative guard before feedback refusal. Keep both guards intact,
+// and wrap only the final policy helper, just as the previous wrapper profile does.
+export const GATE_INT_POLICY_GUARDED_WRAPPER: InteractiveGateSpec = {
+  ...GATE_INT_POLICY_WRAPPER,
+  rebindRe: '^function [\\w$]+\\([\\w$]+\\)\\{return![\\w$]+\\([\\w$]+\\)&&![\\w$]+\\([\\w$]+\\)&&([\\w$]+)\\([\\w$]+\\)\\}',
+};
+
+export const INTERACTIVE_GATES_POLICY_GUARDED_WRAPPER = INTERACTIVE_GATES_QR_RENDERER.map((gate) =>
+  gate.id === 'int.policy' ? GATE_INT_POLICY_GUARDED_WRAPPER : gate,
+);
+
 /**
  * Locator for the interactive gates. For each: resolve the consumer's minified alias from the
  * export table, find its `function <alias>(` definition, extract the underlying override alias

@@ -80,7 +80,8 @@ is absorbed by widening the one gate instead, so it never reaches this table. Kn
 | `async-token` | 2.1.239 – 2.1.247 | inline; same as `preflight` | two getters, chosen at runtime: `if(!(U?await A(r):M()))` — both rebound |
 | `chunked-dispatch` | 2.1.248 – 2.1.316 | **relocated**: the whole remote-control branch moved out of the entry into `chunk-77n86n8h.js`, regrouped into `refuseRemoteControlLocally` / `refuseRemoteControlIneligible` / `startRemoteControl`. Each gate anchors on a colon-destructure key in that chunk; policy neutralizes the shared `exitWithError` to cover all three eligibility checks at once | same as `async-token` |
 | `rendered-qr` | 2.1.317 – 2.1.318 | same as `chunked-dispatch`; interactive QR moves to the renderer and URL override to its defining module | same as `async-token` |
-| `policy-wrapper` | ≥ 2.1.319 (verified through 2.1.322) | same as `rendered-qr`; interactive policy wraps the defining module's policy helper at `isPolicyAllowed` entry | same as `async-token` |
+| `policy-wrapper` | 2.1.319 – 2.1.323 | same as `rendered-qr`; interactive policy wraps the defining module's policy helper at `isPolicyAllowed` entry | same as `async-token` |
+| `guarded-policy-wrapper` | ≥ 2.1.324 (verified through 2.1.325) | same as `policy-wrapper`; interactive policy preserves the additional negative guard and wraps only the final policy helper | same as `async-token` |
 
 A one-version profile like `preflight` is the expected shape, not a smell: 2.1.238 moved one guard
 and 2.1.239 moved the next one over. `chunked-dispatch` is the opposite shape — 2.1.248's re-chunk
@@ -103,6 +104,17 @@ in the same defining module with a one-time wrapper: `allow_remote_control` retu
 other key calls the original helper. The feedback-refusal helper, policy cache and organization
 settings stay untouched. Real inspector rebinds and repeated calls pass on .319/.321/.322;
 headless environment registration also reaches the local server on .322.
+
+2.1.324 added another negative guard at the front of `isPolicyAllowed`:
+`return !guard(key) && !feedbackRefused(key) && policyAllowed(key)`. The daily check caught
+the changed wrapper on .325. The `guarded-policy-wrapper` profile starts at .324 and captures
+only the final policy helper, reusing the previous profile's replacement. Both negative guards
+remain active, and every other policy key still delegates to the original helper. All 18
+locators pass on .324/.325, .318 and every older profile's floor. Real inspector rebinds on
+.324/.325 with an in-memory denied-policy fixture allow repeated Remote Control checks while
+preserving other denials; .325 also passes environment registration. The local worker-spawn
+probe reaches the child's successful guard rebind but times out before `ws.connect`, as it
+also does on .319; that final connection is not verified by this drift fix.
 
 2.1.263 is a second fix of that class, on the child `--sdk-url` locator. Nothing about the guard
 changed; a *different* function grew a second `("--sdk-url")` spelling, in a chunk that gets listed
